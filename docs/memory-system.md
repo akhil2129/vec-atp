@@ -188,20 +188,91 @@ Sunset runs synchronously before any inbox loops start, so no messages are proce
 
 ---
 
-## History Compaction (`src/memory/compaction.ts`)
+## Auto-Compaction (`src/memory/autoCompaction.ts`)
 
-Conversation history can grow too large for the LLM context window. The compaction system trims old messages.
+Keeps agent conversation history under the model's context window using LLM-based summarisation.
+
+### Strategy
+
+| Phase | When | Action |
+|---|---|---|
+| **Overflow recovery** | `agent.prompt()` throws a context-length error | Emergency compact (no pre-flush) → retry |
+| **Threshold maintenance** | After a successful turn, token usage > threshold | Pre-flush (optional) → compact |
+| **Pre-compaction flush** | Before threshold compact | Agent prompted to write notes to LTM/SLTM |
+| **Compaction** | Always | Old messages summarised by LLM → replaced with `[COMPACTION SUMMARY]` block |
+
+### Flow
+
+```
+agent.prompt(text)
+  ↓
+AutoCompactor.run(() => agent.prompt(text))
+  ↓
+  ├─ success → _thresholdCheck()
+  │     if tokens > 75% of usable window:
+  │       pre-flush prompt (PM only) → summarise old messages → replaceMessages()
+  │       log: 🧹 [pm] Compaction #N complete (threshold): 40 msgs → 1 summary
+  │
+  └─ ContextOverflow error
+        Emergency compact (no pre-flush)
+        ↓
+        summarise old messages → replaceMessages()
+        ↓
+        retry agent.prompt(text)
+```
+
+### AutoCompactor
+
+```typescript
+class AutoCompactor {
+  compactionCount: number;
+  constructor(agent: Agent, opts: CompactorOptions);
+  run(promptFn: () => Promise<void>): Promise<void>;
+}
+
+interface CompactorOptions {
+  agentId: string;
+  keepRecentCount?: number;   // messages always kept intact (default: 20, VEC_COMPACT_KEEP_RECENT)
+  thresholdRatio?: number;    // compact when > ratio of usable window (default: 0.75, VEC_COMPACT_THRESHOLD)
+  contextWindow?: number;     // override context window size (default: VEC_CONTEXT_WINDOW)
+  reserveTokens?: number;     // reserved for system prompt + response (default: 8000)
+  enablePreFlush?: boolean;   // pre-compaction memory flush prompt (default: true for PM, false for Dev/BA)
+}
+```
+
+### Agent Configuration
+
+| Agent | Pre-flush | Reason |
+|---|---|---|
+| PM | `true` | Persistent history — PM has memory tools, should save notes before compact |
+| Dev | `false` | History cleared between tasks — pre-flush unnecessary |
+| BA | `false` | Same as Dev |
+
+### Summarisation
+
+A throwaway `Agent` instance (no tools, no memory) summarises the older messages into a dense text block. The summary preserves task IDs, statuses, file paths, code produced, decisions, and blockers.
+
+On LLM failure, a plain-text excerpt is used as fallback (no second API call required).
+
+### Compaction Log
+
+Every compaction emits `🧹` to both console and EventLog:
+```
+[VEC] 🧹 [pm] Context at ~78% of usable window — threshold compaction
+[VEC] 🧹 [pm] Compaction #1 complete (threshold): 42 msgs → 1 summary
+```
+
+---
+
+## Backstop Trim (`src/memory/compaction.ts`)
+
+Simple count-based safety net used as `transformContext` inside the Agent constructor. Trims oldest messages if the count exceeds the limit, never cutting mid-tool-exchange.
 
 ```typescript
 makeCompactionTransform(maxMessages: number): (messages: Message[]) => Message[]
 ```
 
-**Rules:**
-- Keep the most recent `maxMessages` messages
-- Never cut mid-tool-exchange (finds first clean user message boundary)
-- Tool call + tool result pairs are kept together
-
-The transform is applied before each prompt to keep context under the model's limit.
+Set to `100` — fires only if AutoCompactor somehow misses a turn. No LLM summarisation.
 
 ---
 

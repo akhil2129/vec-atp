@@ -43,6 +43,9 @@ Copy `.env.example` to `.env` and fill in your values.
 | `VEC_DASHBOARD_PORT` | `3000` | HTTP dashboard port |
 | `VEC_CLI_ENABLED` | `1` | Enable CLI readline loop (`0` = headless mode) |
 | `VEC_DEBOUNCE_MS` | `1500` | Inbound message debounce window in ms. Rapid messages within this window are batched into one agent turn. Set to `0` to disable. |
+| `VEC_CONTEXT_WINDOW` | `128000` | Model context window in tokens. Used by AutoCompactor to calculate the threshold. Override if using a model with a different limit. |
+| `VEC_COMPACT_THRESHOLD` | `0.75` | Compact when estimated token usage exceeds this fraction of the usable window (contextWindow − 8000 reserve). |
+| `VEC_COMPACT_KEEP_RECENT` | `20` | Number of recent messages to always preserve intact during compaction. |
 
 ### Telegram (Optional)
 
@@ -76,6 +79,9 @@ export const config = {
   dashboardPort: number,
   cliEnabled: boolean,
   debounceMs: number,
+  contextWindow: number,       // VEC_CONTEXT_WINDOW
+  compactThreshold: number,    // VEC_COMPACT_THRESHOLD
+  compactKeepRecent: number,   // VEC_COMPACT_KEEP_RECENT
   telegramBotToken?: string,
   telegramChatId?: string,
 };

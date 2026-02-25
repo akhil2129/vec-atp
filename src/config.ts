@@ -55,6 +55,22 @@ export const config = {
    * Default: 1500ms.
    */
   debounceMs: parseInt(process.env.VEC_DEBOUNCE_MS ?? "1500", 10),
+
+  // ── Auto-compaction ────────────────────────────────────────────────────────
+  /**
+   * Model context window in tokens. Used to detect threshold. Default: 128 000.
+   * Override via VEC_CONTEXT_WINDOW if using a model with a different limit.
+   */
+  contextWindow: parseInt(process.env.VEC_CONTEXT_WINDOW ?? "128000", 10),
+  /**
+   * Compact when estimated token usage exceeds this fraction of the usable window.
+   * Usable = contextWindow - reserveTokens. Default: 0.75.
+   */
+  compactThreshold: parseFloat(process.env.VEC_COMPACT_THRESHOLD ?? "0.75"),
+  /**
+   * Messages to always keep at the tail of history after compaction. Default: 20.
+   */
+  compactKeepRecent: parseInt(process.env.VEC_COMPACT_KEEP_RECENT ?? "20", 10),
   /** Set VEC_CLI_ENABLED=0 to run headless (dashboard + Telegram only, no readline loop). */
   cliEnabled: !["0", "false", "no"].includes(
     (process.env.VEC_CLI_ENABLED ?? "1").trim().toLowerCase()

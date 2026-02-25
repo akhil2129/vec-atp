@@ -22,6 +22,7 @@ import { getMessagingTools } from "../tools/shared/messagingTools.js";
 import { getDateTool } from "../tools/shared/dateTools.js";
 import { founder } from "../identity.js";
 import { makeCompactionTransform } from "../memory/compaction.js";
+import { AutoCompactor } from "../memory/autoCompaction.js";
 import { saveAgentHistory, loadAgentHistory, clearAgentHistory } from "../memory/messageHistory.js";
 import { startPromptDebugMonitor } from "../atp/llmDebug.js";
 import { applyToolConfig } from "../atp/agentToolConfig.js";
@@ -105,6 +106,7 @@ export class PMAgent implements VECAgent {
   readonly inbox: AgentInbox;
   private agent: Agent;
   private allTools: any[];
+  private compactor: AutoCompactor;
   private _isPrompting = false;
   get isRunning(): boolean { return this._isPrompting; }
 
@@ -137,7 +139,13 @@ export class PMAgent implements VECAgent {
         tools: this._filteredTools(),
         messages: [],
       },
-      transformContext: makeCompactionTransform(40),
+      // Backstop trim — fires only if AutoCompactor somehow misses a turn.
+      transformContext: makeCompactionTransform(100),
+    });
+
+    this.compactor = new AutoCompactor(this.agent, {
+      agentId: "pm",
+      enablePreFlush: true, // PM has memory tools — flush to LTM before compacting
     });
 
     // Restore conversation history from previous session
@@ -166,7 +174,7 @@ export class PMAgent implements VECAgent {
     EventLog.log(EventType.AGENT_THINKING, "pm", "", "PM LLM request started (awaiting stream/tool events)");
     this._isPrompting = true;
     try {
-      await this.agent.prompt(text);
+      await this.compactor.run(() => this.agent.prompt(text));
       const lastAssistant = [...this.agent.state.messages]
         .reverse()
         .find((m: any) => m?.role === "assistant") as any;

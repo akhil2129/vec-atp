@@ -16,6 +16,7 @@ import { config, agentWorkspace } from "../config.js";
 import { founder } from "../identity.js";
 import { loadAgentMemory } from "../memory/agentMemory.js";
 import { makeCompactionTransform } from "../memory/compaction.js";
+import { AutoCompactor } from "../memory/autoCompaction.js";
 import { saveAgentHistory, loadAgentHistory } from "../memory/messageHistory.js";
 import { baTools } from "../tools/domain/baTools.js";
 import { getSpecialistTaskTools } from "../tools/domain/baseSpecialistTools.js";
@@ -101,6 +102,7 @@ INBOX & MESSAGING DISCIPLINE:
 export class BAAgent implements VECAgent {
   readonly inbox: AgentInbox;
   private agent: Agent;
+  private compactor: AutoCompactor;
   private _isRunning = false;
   get isRunning() { return this._isRunning; }
   private allTools: any[];
@@ -139,7 +141,13 @@ export class BAAgent implements VECAgent {
         tools: this._filteredTools(),
         messages: [],
       },
-      transformContext: makeCompactionTransform(40),
+      // Backstop trim — fires only if AutoCompactor somehow misses a turn.
+      transformContext: makeCompactionTransform(100),
+    });
+
+    this.compactor = new AutoCompactor(this.agent, {
+      agentId: "ba",
+      enablePreFlush: false, // BA clears messages between tasks — pre-flush not needed
     });
 
     // Restore conversation history from previous session
@@ -195,7 +203,7 @@ export class BAAgent implements VECAgent {
     });
     EventLog.log(EventType.AGENT_THINKING, "ba", "", "BA LLM request started (awaiting stream/tool events)");
     try {
-      await this.agent.prompt(text);
+      await this.compactor.run(() => this.agent.prompt(text));
       const lastAssistant = [...this.agent.state.messages]
         .reverse()
         .find((m: any) => m?.role === "assistant") as any;
@@ -281,7 +289,7 @@ export class BAAgent implements VECAgent {
         try {
           // Fresh task context must be cleared only when the agent is idle.
           this.agent.clearMessages();
-          await this.agent.prompt(taskPrompt);
+          await this.compactor.run(() => this.agent.prompt(taskPrompt));
           startedTaskPrompt = true;
         } catch (err) {
           const errMsg = String(err);
@@ -294,7 +302,6 @@ export class BAAgent implements VECAgent {
       }
 
       // Re-prompt loop: if the LLM stopped without calling update_my_task, push it back.
-      // GPT-4o sometimes stops mid-task thinking it's done — this forces it to continue.
       for (let attempt = 1; attempt <= MAX_CONTINUATIONS; attempt++) {
         const latest = db.getTask(normalizedId);
         if (!latest || latest.status !== "in_progress") break; // done or failed
@@ -313,7 +320,7 @@ export class BAAgent implements VECAgent {
           }],
           timestamp: Date.now(),
         } as any);
-        await this.agent.continue();
+        await this.compactor.run(() => this.agent.continue());
       }
 
       // Hard fallback: if still in_progress after all re-prompts, mark failed so it doesn't block.
