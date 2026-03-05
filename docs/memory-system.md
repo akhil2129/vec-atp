@@ -60,7 +60,7 @@ Rohan Mehta, Senior Developer at VEC. I write clean, practical code.
 
 ## Project Knowledge
 - Main stack: TypeScript, Node.js, SQLite
-- Workspace: D:\Akhil\VEC_PROJECT_SPACE
+- Workspace: <VEC_WORKSPACE>
 - Always read files before editing
 
 ## Key Lessons
