@@ -62,6 +62,11 @@ const BA_FILE_TOOLS: ToolDef[] = [
 
 const DATE_TOOL: ToolDef = { id: "get_current_date", name: "Get Current Date", description: "Get current date and time", group: "Utilities" };
 
+const WEB_TOOLS: ToolDef[] = [
+  { id: "web_search", name: "Web Search", description: "Search the web via SearXNG", group: "Web" },
+  { id: "web_read",   name: "Read Web Page", description: "Fetch and read a web page's text content", group: "Web" },
+];
+
 const READONLY_FILE_TOOLS: ToolDef[] = [
   { id: "read", name: "read", description: "Read files from disk",           group: "Files" },
   { id: "grep", name: "grep", description: "Search file content by pattern", group: "Files" },
@@ -117,6 +122,7 @@ export const AGENT_PROFILES: AgentProfile[] = [
       ...MEMORY_TOOLS,
       ...MESSAGING_TOOLS,
       DATE_TOOL,
+      ...WEB_TOOLS,
     ],
   },
   {
@@ -133,6 +139,7 @@ export const AGENT_PROFILES: AgentProfile[] = [
       ...MEMORY_TOOLS,
       ...AGENT_MESSAGING_TOOLS,
       DATE_TOOL,
+      ...WEB_TOOLS,
     ],
   },
   {
@@ -149,6 +156,7 @@ export const AGENT_PROFILES: AgentProfile[] = [
       ...MEMORY_TOOLS,
       ...AGENT_MESSAGING_TOOLS,
       DATE_TOOL,
+      ...WEB_TOOLS,
     ],
   },
   {
@@ -165,6 +173,7 @@ export const AGENT_PROFILES: AgentProfile[] = [
       ...MEMORY_TOOLS,
       ...AGENT_MESSAGING_TOOLS,
       DATE_TOOL,
+      ...WEB_TOOLS,
     ],
   },
   {
@@ -182,6 +191,7 @@ export const AGENT_PROFILES: AgentProfile[] = [
       ...MEMORY_TOOLS,
       ...AGENT_MESSAGING_TOOLS,
       DATE_TOOL,
+      ...WEB_TOOLS,
     ],
   },
   {
@@ -199,6 +209,7 @@ export const AGENT_PROFILES: AgentProfile[] = [
       ...MEMORY_TOOLS,
       ...AGENT_MESSAGING_TOOLS,
       DATE_TOOL,
+      ...WEB_TOOLS,
       { id: "run_code_scan", name: "Run Code Scan", description: "Trigger SonarQube code scan via OCTO-FLOWS", group: "OCTO-Flows" },
       { id: "run_flow", name: "Run OCTO-Flow", description: "Trigger any named OCTO-FLOW pipeline", group: "OCTO-Flows" },
     ],
@@ -218,6 +229,7 @@ export const AGENT_PROFILES: AgentProfile[] = [
       ...MEMORY_TOOLS,
       ...AGENT_MESSAGING_TOOLS,
       DATE_TOOL,
+      ...WEB_TOOLS,
       { id: "run_sast_scan", name: "Run SAST Scan", description: "Trigger Semgrep SAST scan via OCTO-FLOWS", group: "OCTO-Flows" },
       { id: "run_secret_scan", name: "Run Secret Scan", description: "Trigger Gitleaks secret scan via OCTO-FLOWS", group: "OCTO-Flows" },
       { id: "run_sca_scan", name: "Run SCA Scan", description: "Trigger Trivy dependency vulnerability scan via OCTO-FLOWS", group: "OCTO-Flows" },
@@ -241,6 +253,7 @@ export const AGENT_PROFILES: AgentProfile[] = [
       ...MEMORY_TOOLS,
       ...AGENT_MESSAGING_TOOLS,
       DATE_TOOL,
+      ...WEB_TOOLS,
     ],
   },
   {
@@ -262,6 +275,7 @@ export const AGENT_PROFILES: AgentProfile[] = [
       ...MEMORY_TOOLS,
       ...AGENT_MESSAGING_TOOLS,
       DATE_TOOL,
+      ...WEB_TOOLS,
     ],
   },
 ];

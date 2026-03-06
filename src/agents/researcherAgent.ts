@@ -22,6 +22,7 @@ import { saveAgentHistory, loadAgentHistory } from "../memory/messageHistory.js"
 import { getSpecialistTaskTools } from "../tools/domain/baseSpecialistTools.js";
 import { getMemoryToolsSlim } from "../tools/shared/memoryTools.js";
 import { getReadOnlyTools, getScopedWriteTools, sandboxFileTools } from "../tools/shared/fileTools.js";
+import { getWebTools } from "../tools/shared/webTools.js";
 import { getMessagingTools } from "../tools/shared/messagingTools.js";
 import { getDateTool } from "../tools/shared/dateTools.js";
 import { publishAgentStream } from "../atp/agentStreamBus.js";
@@ -184,6 +185,7 @@ export class ResearcherAgent implements VECAgent {
       ...sandboxFileTools(AGENT_ID, [...getReadOnlyTools(), ...getScopedWriteTools()]),
       ...getMessagingTools(AGENT_ID, this.inbox).filter((t) => t.name !== "broadcast_message"),
       getDateTool(),
+      ...getWebTools(),
     ];
 
     this.agent = new Agent({

@@ -82,6 +82,9 @@ export const config = {
   sonarToken: process.env.SONAR_TOKEN ?? "",
   sonarProjectBaseKey: process.env.SONAR_PROJECT_BASE_KEY ?? "vec",
   sonarScannerImage: process.env.SONAR_SCANNER_IMAGE ?? "sonarsource/sonar-scanner-cli:latest",
+
+  // ── Web Search (SearXNG) ──────────────────────────────────────────────────
+  searxngUrl: process.env.SEARXNG_URL ?? "http://localhost:8888",
 };
 
 /** Shared workspace — all agents can read/write cross-agent deliverables here. */

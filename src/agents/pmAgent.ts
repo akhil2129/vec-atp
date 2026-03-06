@@ -19,6 +19,7 @@ import { getPMTaskTools } from "../tools/pm/taskTools.js";
 import { getPMEmployeeTools } from "../tools/pm/employeeTools.js";
 import { getMemoryToolsSlim } from "../tools/shared/memoryTools.js";
 import { getReadOnlyTools, sandboxFileTools } from "../tools/shared/fileTools.js";
+import { getWebTools } from "../tools/shared/webTools.js";
 import { getMessagingTools } from "../tools/shared/messagingTools.js";
 import { getDateTool } from "../tools/shared/dateTools.js";
 import { founder } from "../identity.js";
@@ -227,6 +228,7 @@ export class PMAgent implements VECAgent {
       ...sandboxFileTools("pm", getReadOnlyTools()),
       ...getMemoryToolsSlim("pm"),
       getDateTool(),
+      ...getWebTools(),
     ];
 
     this.agent = new Agent({

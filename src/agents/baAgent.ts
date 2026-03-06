@@ -21,6 +21,7 @@ import { AutoCompactor } from "../memory/autoCompaction.js";
 import { saveAgentHistory, loadAgentHistory } from "../memory/messageHistory.js";
 import { getSpecialistTaskTools } from "../tools/domain/baseSpecialistTools.js";
 import { getMemoryToolsSlim } from "../tools/shared/memoryTools.js";
+import { getWebTools } from "../tools/shared/webTools.js";
 import { getBAFileTools } from "../tools/domain/baFileTools.js";
 import { sandboxFileTools } from "../tools/shared/fileTools.js";
 import { getMessagingTools } from "../tools/shared/messagingTools.js";
@@ -180,6 +181,7 @@ export class BAAgent implements VECAgent {
       ...sandboxFileTools(AGENT_ID, getBAFileTools()), // extension + path sandboxed
       ...getMessagingTools(AGENT_ID, this.inbox).filter((t) => t.name !== "broadcast_message"),
       getDateTool(),
+      ...getWebTools(),
     ];
 
     this.agent = new Agent({
