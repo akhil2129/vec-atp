@@ -14,10 +14,6 @@ const COLUMNS: { status: TaskStatus; label: string; color: string }[] = [
   { status: "cancelled",   label: "Cancelled",   color: "var(--text-muted)" },
 ];
 
-const AGENT_COLORS: Record<string, string> = {
-  pm: "var(--purple)", dev: "var(--blue)", ba: "var(--green)",
-  qa: "var(--yellow)", security: "var(--red)", devops: "var(--orange)",
-};
 
 function timeAgo(ts: string): string {
   const m = Math.floor((Date.now() - new Date(ts).getTime()) / 60000);
@@ -30,7 +26,7 @@ function timeAgo(ts: string): string {
 function TaskCard({ task, employees, streaming }: { task: Task; employees: Employee[]; streaming: boolean }) {
   const [open, setOpen] = useState(false);
   const emp = employees.find((e) => e.agent_key === task.agent_id);
-  const agentColor = AGENT_COLORS[task.agent_id] ?? "var(--text-muted)";
+  const agentColor = emp?.color || "var(--text-muted)";
 
   return (
     <div
@@ -100,7 +96,7 @@ export default function KanbanView() {
       return {
         value: k,
         label: emp ? emp.name : k,
-        dot: AGENT_COLORS[k]?.replace("var(--", "").replace(")", ""),
+        dot: (emp?.color ?? "").replace("var(--", "").replace(")", ""),
       };
     }),
   ], [agentKeys, emps]);

@@ -1,14 +1,31 @@
 import { useState, useMemo, useRef, useCallback } from "react";
-import { Maximize2, Lock, X, Search, ChevronLeft } from "lucide-react";
-import { usePolling, postApi } from "../hooks/useApi";
+import {
+  Lock, X, Search, ChevronLeft,
+  UserPlus, Play, Pause, Power, Trash2,
+  LayoutGrid, Building2,
+} from "lucide-react";
+import { usePolling, postApi, deleteApi } from "../hooks/useApi";
 import { useAgentStream } from "../hooks/useSSE";
 import { useEmployees } from "../context/EmployeesContext";
-import type { Employee, Task, AgentProfile } from "../types";
+import type {
+  Task, AgentProfile,
+  AgentRuntimeEntry, RoleTemplateSummary,
+} from "../types";
 
 const ROLE_COLORS: Record<string, string> = {
   "Project Manager": "var(--purple)", "Senior Developer": "var(--blue)",
   "Business Analyst": "var(--green)", "QA Engineer": "var(--yellow)",
   "Security Engineer": "var(--red)", "DevOps Engineer": "var(--orange)",
+  "Technical Writer": "var(--purple)", "Solutions Architect": "var(--blue)",
+  "Research Specialist": "var(--green)",
+  // New roles
+  "Frontend Developer": "var(--blue)", "Backend Developer": "var(--orange)",
+  "Mobile Developer": "var(--purple)", "Data Engineer": "var(--green)",
+  "Database Administrator": "var(--blue)", "ML/AI Engineer": "var(--green)",
+  "Site Reliability Engineer": "var(--orange)", "Product Owner": "var(--blue)",
+  "UI/UX Designer": "var(--purple)", "Scrum Master": "var(--purple)",
+  "Data Analyst": "var(--green)", "Release Manager": "var(--green)",
+  "Compliance Officer": "var(--red)", "Support Engineer": "var(--yellow)",
 };
 
 const LOCKED = new Set(["message_agent", "read_inbox"]);
@@ -25,7 +42,6 @@ const TOOL_GROUPS: { label: string; match: (t: string) => boolean }[] = [
 
 const EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
 const DUR = "0.44s";
-// All agents are now implemented — controls shown for everyone.
 
 function getInitials(name: string): string {
   const parts = name.split(" ");
@@ -44,6 +60,198 @@ function groupTools(tools: string[]) {
   const rest = tools.filter((t) => !used.has(t));
   if (rest.length) groups.push({ label: "Other", tools: rest });
   return groups;
+}
+
+/* ── Status badge component ── */
+
+function StatusBadge({ runtime }: { runtime?: AgentRuntimeEntry }) {
+  if (!runtime) return null;
+  if (!runtime.enabled) {
+    return (
+      <span style={{
+        fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 4,
+        background: "var(--bg-tertiary)", color: "var(--text-muted)",
+        border: "1px solid var(--border)",
+      }}>
+        DISABLED
+      </span>
+    );
+  }
+  if (runtime.status === "paused") {
+    return (
+      <span style={{
+        fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 4,
+        background: "var(--yellow-bg, rgba(245,158,11,0.1))", color: "var(--yellow)",
+        border: "1px solid var(--yellow)",
+      }}>
+        PAUSED
+      </span>
+    );
+  }
+  return null; // Running is the default — shown via green dot
+}
+
+/* ── Hire Agent modal ── */
+
+function HireModal({
+  templates,
+  onHire,
+  onClose,
+}: {
+  templates: RoleTemplateSummary[];
+  onHire: (template: string, name: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [selectedTemplate, setSelectedTemplate] = useState("");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const hireableTemplates = templates.filter((t) => !t.mandatory);
+
+  async function submit() {
+    if (!selectedTemplate || !name.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      await onHire(selectedTemplate, name.trim());
+      onClose();
+    } catch (err: any) {
+      setError(err.message ?? String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed", inset: 0, zIndex: 100,
+          background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)",
+        }}
+      />
+      {/* Modal */}
+      <div style={{
+        position: "fixed", top: "50%", left: "50%",
+        transform: "translate(-50%, -50%)", zIndex: 101,
+        background: "var(--bg-card)", border: "1px solid var(--border)",
+        borderRadius: 12, padding: "24px 28px", width: 400, maxWidth: "90vw",
+        boxShadow: "var(--shadow-lg)",
+      }}>
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          marginBottom: 20,
+        }}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)" }}>
+            Hire New Agent
+          </div>
+          <button onClick={onClose} style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            width: 28, height: 28, border: "none", borderRadius: 6,
+            background: "var(--bg-tertiary)", color: "var(--text-muted)",
+            cursor: "pointer", padding: 0,
+          }}>
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Role template selector */}
+        <div style={{ marginBottom: 14 }}>
+          <label style={{
+            fontSize: 11, fontWeight: 600, color: "var(--text-secondary)",
+            display: "block", marginBottom: 6, textTransform: "uppercase",
+            letterSpacing: "0.05em",
+          }}>
+            Role
+          </label>
+          <div style={{
+            display: "grid", gridTemplateColumns: "1fr 1fr",
+            gap: 6,
+          }}>
+            {hireableTemplates.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setSelectedTemplate(t.id)}
+                style={{
+                  fontSize: 12, padding: "8px 12px", borderRadius: 8, cursor: "pointer",
+                  border: "1px solid",
+                  fontFamily: "inherit", fontWeight: 500, textAlign: "left",
+                  borderColor: selectedTemplate === t.id ? "var(--accent)" : "var(--border)",
+                  background: selectedTemplate === t.id ? "var(--blue-bg, rgba(17,88,199,0.1))" : "var(--bg-tertiary)",
+                  color: selectedTemplate === t.id ? "var(--accent)" : "var(--text-secondary)",
+                  transition: "all 0.08s",
+                }}
+              >
+                <div>{t.role}</div>
+                <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
+                  {t.department}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Name input */}
+        <div style={{ marginBottom: 18 }}>
+          <label style={{
+            fontSize: 11, fontWeight: 600, color: "var(--text-secondary)",
+            display: "block", marginBottom: 6, textTransform: "uppercase",
+            letterSpacing: "0.05em",
+          }}>
+            Name
+          </label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+            placeholder="e.g. Priya Sharma"
+            style={{
+              width: "100%", fontSize: 13, padding: "8px 12px", borderRadius: 8,
+              border: "1px solid var(--border)", background: "var(--bg-tertiary)",
+              color: "var(--text-primary)", fontFamily: "inherit",
+              outline: "none", boxSizing: "border-box",
+            }}
+          />
+        </div>
+
+        {error && (
+          <div style={{
+            fontSize: 12, color: "var(--red)", marginBottom: 12,
+            padding: "6px 10px", background: "var(--red-bg, rgba(239,68,68,0.1))",
+            borderRadius: 6,
+          }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button onClick={onClose} style={{
+            fontSize: 12, padding: "8px 16px", borderRadius: 8,
+            border: "1px solid var(--border)", background: "transparent",
+            color: "var(--text-muted)", cursor: "pointer", fontFamily: "inherit",
+            fontWeight: 500,
+          }}>
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={busy || !selectedTemplate || !name.trim()}
+            style={{
+              fontSize: 12, padding: "8px 18px", borderRadius: 8, border: "none",
+              background: "var(--accent)", color: "#fff", cursor: "pointer",
+              fontFamily: "inherit", fontWeight: 600,
+              opacity: busy || !selectedTemplate || !name.trim() ? 0.5 : 1,
+            }}
+          >
+            {busy ? "Hiring..." : "Hire"}
+          </button>
+        </div>
+      </div>
+    </>
+  );
 }
 
 /* ── Expanded tools grid (used inside the full-page panel) ── */
@@ -164,17 +372,21 @@ function ExpandedToolsGrid({ profile }: { profile: AgentProfile }) {
 /* ── Main DirectoryView ── */
 
 export default function DirectoryView() {
-  const { employees } = useEmployees();
+  const { employees, refresh: refreshEmployees } = useEmployees();
   const { data: tasks } = usePolling<Task[]>("/api/tasks", 5000);
   const { data: companyData } = usePolling<{ agents: AgentProfile[] }>("/api/company", 15000);
+  const { data: runtimeData, refresh: refreshRuntime } = usePolling<{ agents: AgentRuntimeEntry[] }>("/api/agents/runtime", 4000);
+  const { data: templatesData } = usePolling<{ templates: RoleTemplateSummary[] }>("/api/role-templates", 30000);
   const { tokens, activeAgents: activeMap } = useAgentStream();
 
   const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useState<"grid" | "department">("grid");
   const [steerInputs, setSteerInputs] = useState<Record<string, string>>({});
   const [interruptInputs, setInterruptInputs] = useState<Record<string, string>>({});
   const [steerOpen, setSteerOpen] = useState<Record<string, boolean>>({});
   const [interruptOpen, setInterruptOpen] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState<Record<string, string | null>>({});
+  const [hireOpen, setHireOpen] = useState(false);
 
   // Expand animation state
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
@@ -189,7 +401,15 @@ export default function DirectoryView() {
   const allEmployees = employees ?? [];
   const allTasks = tasks ?? [];
   const profiles = companyData?.agents ?? [];
+  const runtimeAgents = runtimeData?.agents ?? [];
+  const roleTemplates = templatesData?.templates ?? [];
   const isOpen = animPhase === "entered";
+
+  const runtimeMap = useMemo(() => {
+    const m = new Map<string, AgentRuntimeEntry>();
+    for (const a of runtimeAgents) m.set(a.agent_id, a);
+    return m;
+  }, [runtimeAgents]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return allEmployees;
@@ -200,6 +420,25 @@ export default function DirectoryView() {
       e.agent_key.toLowerCase().includes(q)
     );
   }, [allEmployees, search]);
+
+  /** Group employees by department for department view. */
+  const departments = useMemo(() => {
+    const map = new Map<string, typeof filtered>();
+    for (const emp of filtered) {
+      const dept = emp.department ?? "Other";
+      if (!map.has(dept)) map.set(dept, []);
+      map.get(dept)!.push(emp);
+    }
+    // Sort: Management first, then alphabetical
+    const order = ["Management", "Product", "Engineering", "Analysis", "Design", "Documentation", "Governance"];
+    return [...map.entries()].sort(([a], [b]) => {
+      const ai = order.indexOf(a), bi = order.indexOf(b);
+      if (ai !== -1 && bi !== -1) return ai - bi;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return a.localeCompare(b);
+    });
+  }, [filtered]);
 
   /* ── Expand / Collapse ── */
 
@@ -252,6 +491,236 @@ export default function DirectoryView() {
     finally { setBusy((p) => ({ ...p, [key]: null })); }
   }
 
+  /* ── AR lifecycle actions ── */
+
+  async function doToggle(agentId: string, enabled: boolean) {
+    setBusy((p) => ({ ...p, [agentId]: "toggle" }));
+    try {
+      await postApi(`/api/agents/${agentId}/toggle`, { enabled });
+      refreshRuntime();
+      refreshEmployees();
+    } catch (e) { console.error(e); }
+    finally { setBusy((p) => ({ ...p, [agentId]: null })); }
+  }
+
+  async function doPauseResume(agentId: string, paused: boolean) {
+    setBusy((p) => ({ ...p, [agentId]: "pause" }));
+    try {
+      await postApi(`/api/agents/${agentId}/${paused ? "pause" : "resume"}`, {});
+      refreshRuntime();
+    } catch (e) { console.error(e); }
+    finally { setBusy((p) => ({ ...p, [agentId]: null })); }
+  }
+
+  async function doRemove(agentId: string) {
+    if (!confirm(`Remove agent @${agentId}? This will delete them from the roster.`)) return;
+    setBusy((p) => ({ ...p, [agentId]: "remove" }));
+    try {
+      await deleteApi(`/api/agents/${agentId}`);
+      refreshRuntime();
+      refreshEmployees();
+    } catch (e) { console.error(e); }
+    finally { setBusy((p) => ({ ...p, [agentId]: null })); }
+  }
+
+  async function doHire(template: string, name: string) {
+    await postApi("/api/agents", { template, name });
+    refreshRuntime();
+    refreshEmployees();
+  }
+
+  /* ── Render a single employee card (shared by grid & department views) ── */
+
+  function renderCard(emp: typeof allEmployees[number]) {
+    const key = emp.agent_key;
+    const color = ROLE_COLORS[emp.role] ?? "var(--text-muted)";
+    const active = activeMap[key] ?? false;
+    const rt = runtimeMap.get(key);
+    const empTasks = allTasks.filter((t) => t.agent_id === key);
+    const inProg = empTasks.filter((t) => t.status === "in_progress").length;
+    const done = empTasks.filter((t) => t.status === "completed").length;
+    const todo = empTasks.filter((t) => t.status === "todo").length;
+    const preview = tokens[key] ?? "";
+    const isPM = rt?.template === "pm";
+
+    return (
+      <div
+        key={key}
+        ref={(el) => { if (el) cardRefs.current.set(key, el); }}
+        onClick={() => openSettings(key)}
+        className="card-hover"
+        style={{
+          background: "var(--bg-card)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          padding: 14,
+          cursor: "pointer",
+          transition: "border-color 0.12s, box-shadow 0.12s",
+          position: "relative",
+          display: "flex", flexDirection: "column", gap: 10,
+          opacity: rt && !rt.enabled ? 0.55 : 1,
+        }}
+      >
+        {/* Top row: avatar + name + status badge */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ position: "relative", flexShrink: 0 }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: 9,
+              background: color, opacity: 0.9,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 13, fontWeight: 600, color: "#fff",
+            }}>
+              {emp.initials ?? getInitials(emp.name)}
+            </div>
+            {active && (
+              <div style={{
+                position: "absolute", bottom: -1, right: -1,
+                width: 9, height: 9, borderRadius: "50%",
+                background: "var(--green)",
+                border: "2px solid var(--bg-card)",
+              }} />
+            )}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{
+              display: "flex", alignItems: "center", gap: 6,
+            }}>
+              <span style={{
+                fontSize: 13, fontWeight: 600, color: "var(--text-primary)",
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              }}>
+                {emp.name}
+              </span>
+              <StatusBadge runtime={rt} />
+            </div>
+            <div style={{ fontSize: 11, color: color, fontWeight: 500, marginTop: 1 }}>
+              {emp.role}
+            </div>
+          </div>
+          <span style={{
+            fontSize: 10, fontFamily: "monospace", color: "var(--text-muted)",
+            flexShrink: 0,
+          }}>
+            @{key}
+          </span>
+        </div>
+
+        {/* Task stats row */}
+        {empTasks.length > 0 && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {inProg > 0 && (
+              <span style={{
+                fontSize: 10, fontWeight: 500, color: "var(--blue)",
+                background: "var(--blue-bg, rgba(17,88,199,0.1))",
+                padding: "2px 7px", borderRadius: 4,
+              }}>
+                {inProg} active
+              </span>
+            )}
+            {todo > 0 && (
+              <span style={{
+                fontSize: 10, fontWeight: 500, color: "var(--text-muted)",
+                background: "var(--bg-tertiary)",
+                padding: "2px 7px", borderRadius: 4,
+              }}>
+                {todo} pending
+              </span>
+            )}
+            {done > 0 && (
+              <span style={{
+                fontSize: 10, fontWeight: 500, color: "var(--green)",
+                background: "var(--green-bg, rgba(16,185,129,0.1))",
+                padding: "2px 7px", borderRadius: 4,
+              }}>
+                {done} done
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Live token preview */}
+        {preview && (
+          <div style={{
+            fontSize: 10.5, fontFamily: "monospace", color: "var(--text-muted)",
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            background: "var(--bg-tertiary)",
+            padding: "4px 8px", borderRadius: 5,
+          }}>
+            {preview.length > 120 ? preview.slice(-120) : preview}
+          </div>
+        )}
+
+        {/* Lifecycle controls */}
+        {rt && !isPM && (
+          <div
+            style={{ display: "flex", gap: 4, marginTop: "auto" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => doToggle(key, !rt.enabled)}
+              disabled={busy[key] === "toggle"}
+              title={rt.enabled ? "Disable" : "Enable"}
+              style={{
+                display: "flex", alignItems: "center", gap: 3,
+                fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 5,
+                border: "1px solid", cursor: "pointer", fontFamily: "inherit",
+                borderColor: rt.enabled ? "var(--green)" : "var(--border)",
+                background: rt.enabled ? "var(--green-bg, rgba(16,185,129,0.1))" : "var(--bg-tertiary)",
+                color: rt.enabled ? "var(--green)" : "var(--text-muted)",
+                opacity: busy[key] === "toggle" ? 0.5 : 1,
+              }}
+            >
+              <Power size={10} />
+              {rt.enabled ? "On" : "Off"}
+            </button>
+            {rt.enabled && (
+              <button
+                onClick={() => doPauseResume(key, rt.status !== "paused")}
+                disabled={busy[key] === "pause"}
+                title={rt.status === "paused" ? "Resume" : "Pause"}
+                style={{
+                  display: "flex", alignItems: "center", gap: 3,
+                  fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 5,
+                  border: "1px solid", cursor: "pointer", fontFamily: "inherit",
+                  borderColor: rt.status === "paused" ? "var(--yellow)" : "var(--border)",
+                  background: rt.status === "paused" ? "var(--yellow-bg, rgba(245,158,11,0.1))" : "var(--bg-tertiary)",
+                  color: rt.status === "paused" ? "var(--yellow)" : "var(--text-muted)",
+                  opacity: busy[key] === "pause" ? 0.5 : 1,
+                }}
+              >
+                {rt.status === "paused" ? <Play size={10} /> : <Pause size={10} />}
+                {rt.status === "paused" ? "Resume" : "Pause"}
+              </button>
+            )}
+            <button
+              onClick={() => doRemove(key)}
+              disabled={busy[key] === "remove"}
+              title="Remove"
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 24, height: 24, borderRadius: 5, padding: 0, marginLeft: "auto",
+                border: "1px solid var(--border)", cursor: "pointer",
+                background: "transparent", color: "var(--text-muted)",
+                opacity: busy[key] === "remove" ? 0.5 : 1,
+                transition: "color 0.08s, border-color 0.08s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = "var(--red)";
+                e.currentTarget.style.color = "var(--red)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = "var(--border)";
+                e.currentTarget.style.color = "var(--text-muted)";
+              }}
+            >
+              <Trash2 size={10} />
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   /* ── Expanded panel data ── */
 
   const expandedEmp = expandedAgent
@@ -262,6 +731,7 @@ export default function DirectoryView() {
     : null;
   const expandedColor = expandedEmp ? (ROLE_COLORS[expandedEmp.role] ?? "var(--text-muted)") : "var(--text-muted)";
   const expandedTasks = expandedAgent ? allTasks.filter((t) => t.agent_id === expandedAgent) : [];
+  const expandedRuntime = expandedAgent ? runtimeMap.get(expandedAgent) : undefined;
 
   return (
     <div ref={rootRef} style={{
@@ -282,228 +752,127 @@ export default function DirectoryView() {
               : `${filtered.length} of ${allEmployees.length} employees`}
           </div>
         </div>
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8,
-          background: "var(--bg-tertiary)",
-          border: "1px solid var(--border)",
-          borderRadius: 20, padding: "6px 14px",
-          marginTop: 4, flexShrink: 0,
-        }}>
-          <Search size={14} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search..."
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* View mode toggle */}
+          <div style={{
+            display: "flex", borderRadius: 8, overflow: "hidden",
+            border: "1px solid var(--border)", flexShrink: 0,
+          }}>
+            {([["grid", LayoutGrid, "Grid"], ["department", Building2, "Dept"]] as const).map(([mode, Icon, label]) => (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                title={`${label} view`}
+                style={{
+                  display: "flex", alignItems: "center", gap: 4,
+                  fontSize: 11, fontWeight: 500, padding: "5px 10px",
+                  border: "none", cursor: "pointer", fontFamily: "inherit",
+                  background: viewMode === mode ? "var(--accent)" : "transparent",
+                  color: viewMode === mode ? "#fff" : "var(--text-muted)",
+                  transition: "all 0.08s",
+                }}
+              >
+                <Icon size={12} />
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Hire Agent button */}
+          <button
+            onClick={() => setHireOpen(true)}
             style={{
-              border: "none", outline: "none", background: "transparent",
-              color: "var(--text-primary)", fontSize: 12.5,
-              width: 180, fontFamily: "inherit", padding: 0,
+              display: "flex", alignItems: "center", gap: 6,
+              fontSize: 12, fontWeight: 600, padding: "7px 14px", borderRadius: 20,
+              border: "none", background: "var(--accent)", color: "#fff",
+              cursor: "pointer", fontFamily: "inherit", flexShrink: 0,
+              transition: "opacity 0.08s",
             }}
-          />
-          {search && (
-            <button onClick={() => setSearch("")} style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: 14, height: 14, border: "none", background: "var(--bg-hover)",
-              color: "var(--text-muted)", cursor: "pointer", borderRadius: 3,
-              padding: 0, flexShrink: 0,
-            }}>
-              <X size={9} />
-            </button>
-          )}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.85"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+          >
+            <UserPlus size={13} />
+            Hire
+          </button>
+
+          {/* Search */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8,
+            background: "var(--bg-tertiary)",
+            border: "1px solid var(--border)",
+            borderRadius: 20, padding: "6px 14px",
+            flexShrink: 0,
+          }}>
+            <Search size={14} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search..."
+              style={{
+                border: "none", outline: "none", background: "transparent",
+                color: "var(--text-primary)", fontSize: 12.5,
+                width: 180, fontFamily: "inherit", padding: 0,
+              }}
+            />
+            {search && (
+              <button onClick={() => setSearch("")} style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 14, height: 14, border: "none", background: "var(--bg-hover)",
+                color: "var(--text-muted)", cursor: "pointer", borderRadius: 3,
+                padding: 0, flexShrink: 0,
+              }}>
+                <X size={9} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
       {/* ── Employee cards ── */}
       <div style={{ flex: 1, overflowY: "auto", padding: "4px 24px 20px" }}>
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-          gap: 12,
-        }}>
-          {filtered.map((emp) => {
-            const active = activeMap[emp.agent_key] ?? false;
-            const empTasks = allTasks.filter((t) => t.agent_id === emp.agent_key);
-            const inProg = empTasks.filter((t) => t.status === "in_progress").length;
-            const done = empTasks.filter((t) => t.status === "completed").length;
-            const todo = empTasks.filter((t) => t.status === "todo").length;
-            const color = ROLE_COLORS[emp.role] ?? "var(--text-muted)";
-            const profile = profiles.find((a) => a.agent_id === emp.agent_key);
-
-            return (
-              <div
-                key={emp.employee_id}
-                ref={(el) => { if (el) cardRefs.current.set(emp.agent_key, el); }}
-                className="vec-card fade-in"
-                style={{ padding: "16px 18px", transition: "border-color 0.1s" }}
-              >
-                {/* Header row */}
-                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-                  <div style={{ position: "relative", flexShrink: 0 }}>
-                    <div style={{
-                      width: 40, height: 40, borderRadius: 11,
-                      background: color, opacity: 0.9,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: 14, fontWeight: 600, color: "#fff",
-                    }}>
-                      {getInitials(emp.name)}
-                    </div>
-                    {active && (
-                      <div style={{
-                        position: "absolute", bottom: -1, right: -1,
-                        width: 10, height: 10, borderRadius: "50%",
-                        background: "var(--green)",
-                        border: "2px solid var(--bg-card)",
-                      }} />
-                    )}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", lineHeight: 1.3 }}>
-                      {emp.name}
-                    </div>
-                    <div style={{ fontSize: 12, color, fontWeight: 500, marginTop: 1 }}>
-                      {emp.role}
-                    </div>
-                  </div>
-                  {profile && (
-                    <button
-                      className="card-expand-btn"
-                      onClick={() => openSettings(emp.agent_key)}
-                      title="Expand"
-                      style={{
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        width: 28, height: 28, border: "none", borderRadius: 7,
-                        background: "transparent",
-                        color: "var(--text-muted)",
-                        cursor: "pointer", flexShrink: 0, padding: 0,
-                      }}
-                    >
-                      <Maximize2 size={13} />
-                    </button>
-                  )}
-                </div>
-
-                {/* Agent ID */}
+        {viewMode === "department" ? (
+          /* ── Department grouped view ── */
+          <div>
+            {departments.map(([dept, emps]) => (
+              <div key={dept} style={{ marginBottom: 24 }}>
+                {/* Department header */}
                 <div style={{
-                  fontSize: 11, color: "var(--text-muted)", fontFamily: "monospace",
-                  marginBottom: 12, opacity: 0.7,
+                  display: "flex", alignItems: "center", gap: 10,
+                  marginBottom: 10, paddingBottom: 6,
+                  borderBottom: "1px solid var(--border)",
                 }}>
-                  @{emp.agent_key}
-                </div>
-
-                {/* Task stats */}
-                {empTasks.length > 0 && (
-                  <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
-                    {inProg > 0 && (
-                      <span style={{
-                        fontSize: 11, fontWeight: 500, color: "var(--blue)",
-                        background: "var(--blue-bg)", padding: "2px 8px", borderRadius: 5,
-                      }}>
-                        {inProg} active
-                      </span>
-                    )}
-                    {todo > 0 && (
-                      <span style={{
-                        fontSize: 11, fontWeight: 500, color: "var(--text-muted)",
-                        background: "var(--bg-tertiary)", padding: "2px 8px", borderRadius: 5,
-                      }}>
-                        {todo} pending
-                      </span>
-                    )}
-                    {done > 0 && (
-                      <span style={{
-                        fontSize: 11, fontWeight: 500, color: "var(--green)",
-                        background: "var(--green-bg)", padding: "2px 8px", borderRadius: 5,
-                      }}>
-                        {done} done
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {/* Live stream preview */}
-                {active && tokens[emp.agent_key] && (
-                  <div style={{
-                    padding: "6px 10px", background: "var(--bg-tertiary)",
-                    borderRadius: 6, marginBottom: 12,
-                    fontSize: 11, color: "var(--text-secondary)", fontFamily: "monospace",
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    borderLeft: `2px solid ${color}`,
+                  <Building2 size={14} style={{ color: "var(--text-muted)" }} />
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", letterSpacing: "0.01em" }}>
+                    {dept}
+                  </span>
+                  <span style={{
+                    fontSize: 11, color: "var(--text-muted)", background: "var(--bg-tertiary)",
+                    padding: "1px 8px", borderRadius: 5, fontFamily: "monospace",
                   }}>
-                    {tokens[emp.agent_key].slice(-80)}
-                  </div>
-                )}
-
-                {/* Steer / Interrupt controls */}
-                {(
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button onClick={() => setSteerOpen((p) => ({ ...p, [emp.agent_key]: !p[emp.agent_key] }))}
-                        style={{
-                          flex: 1, fontSize: 11, padding: "5px 10px", borderRadius: 6,
-                          border: "1px solid", fontFamily: "inherit", fontWeight: 500, cursor: "pointer",
-                          borderColor: steerOpen[emp.agent_key] ? "var(--blue)" : "var(--border)",
-                          background: steerOpen[emp.agent_key] ? "var(--blue-bg)" : "transparent",
-                          color: steerOpen[emp.agent_key] ? "var(--blue)" : "var(--text-muted)",
-                          transition: "all 0.08s",
-                        }}>
-                        Steer
-                      </button>
-                      <button onClick={() => setInterruptOpen((p) => ({ ...p, [emp.agent_key]: !p[emp.agent_key] }))}
-                        style={{
-                          flex: 1, fontSize: 11, padding: "5px 10px", borderRadius: 6,
-                          border: "1px solid", fontFamily: "inherit", fontWeight: 500, cursor: "pointer",
-                          borderColor: interruptOpen[emp.agent_key] ? "var(--red)" : "var(--border)",
-                          background: interruptOpen[emp.agent_key] ? "var(--red-bg)" : "transparent",
-                          color: interruptOpen[emp.agent_key] ? "var(--red)" : "var(--text-muted)",
-                          transition: "all 0.08s",
-                        }}>
-                        Interrupt
-                      </button>
-                    </div>
-
-                    {steerOpen[emp.agent_key] && (
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <input value={steerInputs[emp.agent_key] ?? ""}
-                          onChange={(e) => setSteerInputs((p) => ({ ...p, [emp.agent_key]: e.target.value }))}
-                          onKeyDown={(e) => e.key === "Enter" && doSteer(emp.agent_key)}
-                          placeholder="Message..."
-                          style={{ flex: 1, fontSize: 11, padding: "5px 10px", borderRadius: 6 }} />
-                        <button onClick={() => doSteer(emp.agent_key)} disabled={busy[emp.agent_key] === "steer"}
-                          style={{
-                            fontSize: 11, padding: "5px 12px", borderRadius: 6, border: "none",
-                            background: "var(--accent)", color: "#fff", cursor: "pointer",
-                            fontFamily: "inherit", fontWeight: 500,
-                            opacity: busy[emp.agent_key] === "steer" ? 0.5 : 1,
-                          }}>
-                          {busy[emp.agent_key] === "steer" ? "..." : "Send"}
-                        </button>
-                      </div>
-                    )}
-
-                    {interruptOpen[emp.agent_key] && (
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <input value={interruptInputs[emp.agent_key] ?? ""}
-                          onChange={(e) => setInterruptInputs((p) => ({ ...p, [emp.agent_key]: e.target.value }))}
-                          onKeyDown={(e) => e.key === "Enter" && doInterrupt(emp.agent_key)}
-                          placeholder="Reason..."
-                          style={{ flex: 1, fontSize: 11, padding: "5px 10px", borderRadius: 6, borderColor: "var(--red)" }} />
-                        <button onClick={() => doInterrupt(emp.agent_key)} disabled={busy[emp.agent_key] === "interrupt"}
-                          style={{
-                            fontSize: 11, padding: "5px 12px", borderRadius: 6, border: "1px solid var(--red)",
-                            background: "var(--red-bg)", color: "var(--red)", cursor: "pointer",
-                            fontFamily: "inherit", fontWeight: 500,
-                            opacity: busy[emp.agent_key] === "interrupt" ? 0.5 : 1,
-                          }}>
-                          {busy[emp.agent_key] === "interrupt" ? "..." : "Stop"}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
+                    {emps.length}
+                  </span>
+                </div>
+                {/* Cards grid */}
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+                  gap: 12,
+                }}>
+                  {emps.map((emp) => renderCard(emp))}
+                </div>
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        ) : (
+          /* ── Flat grid view ── */
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+            gap: 12,
+          }}>
+            {filtered.map((emp) => renderCard(emp))}
+          </div>
+        )}
 
         {filtered.length === 0 && allEmployees.length > 0 && (
           <div style={{ textAlign: "center", padding: "48px 24px", color: "var(--text-muted)", fontSize: 13 }}>
@@ -529,6 +898,7 @@ export default function DirectoryView() {
         const eDone = expandedTasks.filter((t) => t.status === "completed").length;
         const eTodo = expandedTasks.filter((t) => t.status === "todo").length;
         const active = activeMap[expandedAgent] ?? false;
+        const isPM = expandedRuntime?.template === "pm";
 
         return (
           <div style={{
@@ -597,13 +967,84 @@ export default function DirectoryView() {
                 </div>
 
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}>
-                    {expandedEmp.name}
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                  }}>
+                    <span style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}>
+                      {expandedEmp.name}
+                    </span>
+                    <StatusBadge runtime={expandedRuntime} />
                   </div>
                   <div style={{ fontSize: 12, color: expandedColor, fontWeight: 500, marginTop: 1 }}>
                     {expandedEmp.role} · @{expandedAgent}
                   </div>
                 </div>
+
+                {/* Lifecycle buttons in expanded header */}
+                {expandedRuntime && !isPM && (
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0, marginRight: 8 }}>
+                    <button
+                      onClick={() => doToggle(expandedAgent, !expandedRuntime.enabled)}
+                      disabled={busy[expandedAgent] === "toggle"}
+                      title={expandedRuntime.enabled ? "Disable agent" : "Enable agent"}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 4,
+                        fontSize: 11, fontWeight: 600, padding: "5px 12px", borderRadius: 6,
+                        border: "1px solid", cursor: "pointer", fontFamily: "inherit",
+                        borderColor: expandedRuntime.enabled ? "var(--green)" : "var(--border)",
+                        background: expandedRuntime.enabled ? "var(--green-bg, rgba(16,185,129,0.1))" : "var(--bg-tertiary)",
+                        color: expandedRuntime.enabled ? "var(--green)" : "var(--text-muted)",
+                        opacity: busy[expandedAgent] === "toggle" ? 0.5 : 1,
+                      }}
+                    >
+                      <Power size={11} />
+                      {expandedRuntime.enabled ? "On" : "Off"}
+                    </button>
+                    {expandedRuntime.enabled && (
+                      <button
+                        onClick={() => doPauseResume(expandedAgent, expandedRuntime.status !== "paused")}
+                        disabled={busy[expandedAgent] === "pause"}
+                        title={expandedRuntime.status === "paused" ? "Resume" : "Pause"}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 4,
+                          fontSize: 11, fontWeight: 600, padding: "5px 12px", borderRadius: 6,
+                          border: "1px solid", cursor: "pointer", fontFamily: "inherit",
+                          borderColor: expandedRuntime.status === "paused" ? "var(--yellow)" : "var(--border)",
+                          background: expandedRuntime.status === "paused" ? "var(--yellow-bg, rgba(245,158,11,0.1))" : "var(--bg-tertiary)",
+                          color: expandedRuntime.status === "paused" ? "var(--yellow)" : "var(--text-muted)",
+                          opacity: busy[expandedAgent] === "pause" ? 0.5 : 1,
+                        }}
+                      >
+                        {expandedRuntime.status === "paused" ? <Play size={11} /> : <Pause size={11} />}
+                        {expandedRuntime.status === "paused" ? "Resume" : "Pause"}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => { doRemove(expandedAgent); closeSettings(); }}
+                      disabled={busy[expandedAgent] === "remove"}
+                      title="Remove agent"
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        width: 30, height: 30, borderRadius: 6, padding: 0,
+                        border: "1px solid var(--border)", cursor: "pointer",
+                        background: "transparent", color: "var(--text-muted)",
+                        opacity: busy[expandedAgent] === "remove" ? 0.5 : 1,
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = "var(--red)";
+                        e.currentTarget.style.color = "var(--red)";
+                        e.currentTarget.style.background = "var(--red-bg, rgba(239,68,68,0.1))";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = "var(--border)";
+                        e.currentTarget.style.color = "var(--text-muted)";
+                        e.currentTarget.style.background = "transparent";
+                      }}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                )}
 
                 {/* Task badges in header */}
                 {expandedTasks.length > 0 && (
@@ -645,92 +1086,99 @@ export default function DirectoryView() {
                 )}
 
                 {/* Controls section */}
-                {(
-                  <div style={{ marginTop: 24 }}>
-                    <div style={{
-                      fontSize: 13, fontWeight: 600, color: "var(--text-primary)",
-                      marginBottom: 12,
-                    }}>
-                      Controls
-                    </div>
-                    <div style={{ display: "flex", gap: 8, maxWidth: 500 }}>
-                      <button
-                        onClick={() => setSteerOpen((p) => ({ ...p, [expandedAgent]: !p[expandedAgent] }))}
-                        style={{
-                          flex: 1, fontSize: 12, padding: "8px 14px", borderRadius: 8,
-                          border: "1px solid", fontFamily: "inherit", fontWeight: 500, cursor: "pointer",
-                          borderColor: steerOpen[expandedAgent] ? "var(--blue)" : "var(--border)",
-                          background: steerOpen[expandedAgent] ? "var(--blue-bg)" : "transparent",
-                          color: steerOpen[expandedAgent] ? "var(--blue)" : "var(--text-muted)",
-                          transition: "all 0.08s",
-                        }}
-                      >
-                        Steer
-                      </button>
-                      <button
-                        onClick={() => setInterruptOpen((p) => ({ ...p, [expandedAgent]: !p[expandedAgent] }))}
-                        style={{
-                          flex: 1, fontSize: 12, padding: "8px 14px", borderRadius: 8,
-                          border: "1px solid", fontFamily: "inherit", fontWeight: 500, cursor: "pointer",
-                          borderColor: interruptOpen[expandedAgent] ? "var(--red)" : "var(--border)",
-                          background: interruptOpen[expandedAgent] ? "var(--red-bg)" : "transparent",
-                          color: interruptOpen[expandedAgent] ? "var(--red)" : "var(--text-muted)",
-                          transition: "all 0.08s",
-                        }}
-                      >
-                        Interrupt
-                      </button>
-                    </div>
-
-                    {steerOpen[expandedAgent] && (
-                      <div style={{ display: "flex", gap: 8, marginTop: 8, maxWidth: 500 }}>
-                        <input
-                          value={steerInputs[expandedAgent] ?? ""}
-                          onChange={(e) => setSteerInputs((p) => ({ ...p, [expandedAgent]: e.target.value }))}
-                          onKeyDown={(e) => e.key === "Enter" && doSteer(expandedAgent)}
-                          placeholder="Message..."
-                          style={{ flex: 1, fontSize: 12, padding: "7px 12px", borderRadius: 8 }}
-                        />
-                        <button onClick={() => doSteer(expandedAgent)} disabled={busy[expandedAgent] === "steer"}
-                          style={{
-                            fontSize: 12, padding: "7px 16px", borderRadius: 8, border: "none",
-                            background: "var(--accent)", color: "#fff", cursor: "pointer",
-                            fontFamily: "inherit", fontWeight: 500,
-                            opacity: busy[expandedAgent] === "steer" ? 0.5 : 1,
-                          }}>
-                          {busy[expandedAgent] === "steer" ? "..." : "Send"}
-                        </button>
-                      </div>
-                    )}
-
-                    {interruptOpen[expandedAgent] && (
-                      <div style={{ display: "flex", gap: 8, marginTop: 8, maxWidth: 500 }}>
-                        <input
-                          value={interruptInputs[expandedAgent] ?? ""}
-                          onChange={(e) => setInterruptInputs((p) => ({ ...p, [expandedAgent]: e.target.value }))}
-                          onKeyDown={(e) => e.key === "Enter" && doInterrupt(expandedAgent)}
-                          placeholder="Reason..."
-                          style={{ flex: 1, fontSize: 12, padding: "7px 12px", borderRadius: 8, borderColor: "var(--red)" }}
-                        />
-                        <button onClick={() => doInterrupt(expandedAgent)} disabled={busy[expandedAgent] === "interrupt"}
-                          style={{
-                            fontSize: 12, padding: "7px 16px", borderRadius: 8,
-                            border: "1px solid var(--red)",
-                            background: "var(--red-bg)", color: "var(--red)",
-                            cursor: "pointer", fontFamily: "inherit", fontWeight: 500,
-                            opacity: busy[expandedAgent] === "interrupt" ? 0.5 : 1,
-                          }}>
-                          {busy[expandedAgent] === "interrupt" ? "..." : "Stop"}
-                        </button>
-                      </div>
-                    )}
+                <div style={{ marginTop: 24 }}>
+                  <div style={{
+                    fontSize: 13, fontWeight: 600, color: "var(--text-primary)",
+                    marginBottom: 12,
+                  }}>
+                    Controls
                   </div>
-                )}
+                  <div style={{ display: "flex", gap: 8, maxWidth: 500 }}>
+                    <button
+                      onClick={() => setSteerOpen((p) => ({ ...p, [expandedAgent]: !p[expandedAgent] }))}
+                      style={{
+                        flex: 1, fontSize: 12, padding: "8px 14px", borderRadius: 8,
+                        border: "1px solid", fontFamily: "inherit", fontWeight: 500, cursor: "pointer",
+                        borderColor: steerOpen[expandedAgent] ? "var(--blue)" : "var(--border)",
+                        background: steerOpen[expandedAgent] ? "var(--blue-bg)" : "transparent",
+                        color: steerOpen[expandedAgent] ? "var(--blue)" : "var(--text-muted)",
+                        transition: "all 0.08s",
+                      }}
+                    >
+                      Steer
+                    </button>
+                    <button
+                      onClick={() => setInterruptOpen((p) => ({ ...p, [expandedAgent]: !p[expandedAgent] }))}
+                      style={{
+                        flex: 1, fontSize: 12, padding: "8px 14px", borderRadius: 8,
+                        border: "1px solid", fontFamily: "inherit", fontWeight: 500, cursor: "pointer",
+                        borderColor: interruptOpen[expandedAgent] ? "var(--red)" : "var(--border)",
+                        background: interruptOpen[expandedAgent] ? "var(--red-bg)" : "transparent",
+                        color: interruptOpen[expandedAgent] ? "var(--red)" : "var(--text-muted)",
+                        transition: "all 0.08s",
+                      }}
+                    >
+                      Interrupt
+                    </button>
+                  </div>
+
+                  {steerOpen[expandedAgent] && (
+                    <div style={{ display: "flex", gap: 8, marginTop: 8, maxWidth: 500 }}>
+                      <input
+                        value={steerInputs[expandedAgent] ?? ""}
+                        onChange={(e) => setSteerInputs((p) => ({ ...p, [expandedAgent]: e.target.value }))}
+                        onKeyDown={(e) => e.key === "Enter" && doSteer(expandedAgent)}
+                        placeholder="Message..."
+                        style={{ flex: 1, fontSize: 12, padding: "7px 12px", borderRadius: 8 }}
+                      />
+                      <button onClick={() => doSteer(expandedAgent)} disabled={busy[expandedAgent] === "steer"}
+                        style={{
+                          fontSize: 12, padding: "7px 16px", borderRadius: 8, border: "none",
+                          background: "var(--accent)", color: "#fff", cursor: "pointer",
+                          fontFamily: "inherit", fontWeight: 500,
+                          opacity: busy[expandedAgent] === "steer" ? 0.5 : 1,
+                        }}>
+                        {busy[expandedAgent] === "steer" ? "..." : "Send"}
+                      </button>
+                    </div>
+                  )}
+
+                  {interruptOpen[expandedAgent] && (
+                    <div style={{ display: "flex", gap: 8, marginTop: 8, maxWidth: 500 }}>
+                      <input
+                        value={interruptInputs[expandedAgent] ?? ""}
+                        onChange={(e) => setInterruptInputs((p) => ({ ...p, [expandedAgent]: e.target.value }))}
+                        onKeyDown={(e) => e.key === "Enter" && doInterrupt(expandedAgent)}
+                        placeholder="Reason..."
+                        style={{ flex: 1, fontSize: 12, padding: "7px 12px", borderRadius: 8, borderColor: "var(--red)" }}
+                      />
+                      <button onClick={() => doInterrupt(expandedAgent)} disabled={busy[expandedAgent] === "interrupt"}
+                        style={{
+                          fontSize: 12, padding: "7px 16px", borderRadius: 8,
+                          border: "1px solid var(--red)",
+                          background: "var(--red-bg)", color: "var(--red)",
+                          cursor: "pointer", fontFamily: "inherit", fontWeight: 500,
+                          opacity: busy[expandedAgent] === "interrupt" ? 0.5 : 1,
+                        }}>
+                        {busy[expandedAgent] === "interrupt" ? "..." : "Stop"}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
         );
       })()}
+
+      {/* ── Hire Agent Modal ── */}
+      {hireOpen && (
+        <HireModal
+          templates={roleTemplates}
+          onHire={doHire}
+          onClose={() => setHireOpen(false)}
+        />
+      )}
     </div>
   );
 }

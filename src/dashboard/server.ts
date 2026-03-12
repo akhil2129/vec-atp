@@ -33,6 +33,8 @@ import { UserChatLog } from "../atp/chatLog.js";
 import { agentStreamBus, getReplayBuffer } from "../atp/agentStreamBus.js";
 import type { StreamToken } from "../atp/agentStreamBus.js";
 import { AGENT_PROFILES, getEnabledTools, setAgentTools } from "../atp/agentToolConfig.js";
+import { getRosterEntry, getRoleTemplates } from "../ar/roster.js";
+import { AgentRuntime } from "../atp/agentRuntime.js";
 import { getMCPTools } from "../mcp/mcpBridge.js";
 import { ActiveChannelState } from "../channels/activeChannel.js";
 import type { VECAgent } from "../atp/inboxLoop.js";
@@ -2463,7 +2465,8 @@ function getDashboardHtml(): string {
 
 // â"€â"€ Server â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
-export function startDashboardServer(agents: Map<string, VECAgent>, port = config.dashboardPort): void {
+export function startDashboardServer(runtime: AgentRuntime, port = config.dashboardPort): void {
+  const agents = runtime.allAgents; // backward compat — same Map reference
   const app = express();
   app.use(express.json());
 
@@ -2478,14 +2481,19 @@ export function startDashboardServer(agents: Map<string, VECAgent>, port = confi
 
   app.get("/api/employees", (_req, res) => {
     // Map DB field names → React-friendly names (agent_id→agent_key, designation→role)
-    const employees = ATPDatabase.listEmployees().map((e) => ({
-      employee_id: e.employee_id,
-      name: e.name,
-      role: e.designation,
-      agent_key: e.agent_id,
-      status: e.status,
-      department: e.department,
-    }));
+    const employees = ATPDatabase.listEmployees().map((e) => {
+      const rEntry = getRosterEntry(e.agent_id);
+      return {
+        employee_id: e.employee_id,
+        name: e.name,
+        role: e.designation,
+        agent_key: e.agent_id,
+        status: e.status,
+        department: e.department,
+        color: rEntry?.color ?? "",
+        initials: rEntry?.initials ?? "",
+      };
+    });
     res.json(employees);
   });
 
@@ -2499,6 +2507,16 @@ export function startDashboardServer(agents: Map<string, VECAgent>, port = confi
 
   app.get("/api/agent-messages", (_req, res) => {
     res.json(AgentMessageQueue.peekAll());
+  });
+
+  /** Snoop: peek a specific agent's inbox (PM inbox for "pm", agent queue for others). */
+  app.get("/api/inbox/:agentId", (req, res) => {
+    const id = req.params.agentId.toLowerCase();
+    if (id === "pm") {
+      res.json(MessageQueue.peek());
+    } else {
+      res.json(AgentMessageQueue.peekForAgent(id));
+    }
   });
 
   app.get("/api/message-flow", (_req, res) => {
@@ -2653,6 +2671,95 @@ export function startDashboardServer(agents: Map<string, VECAgent>, port = confi
       }));
       res.json({ servers });
     } catch { res.json({ servers: [] }); }
+  });
+
+  // ── Agent Runtime: dynamic agent lifecycle management ─────────────────────
+  app.get("/api/role-templates", (_req, res) => {
+    const templates = getRoleTemplates();
+    const result = Object.entries(templates).map(([id, t]) => ({
+      id,
+      role: t.role,
+      department: t.department,
+      category: t.category,
+      mandatory: t.mandatory ?? false,
+      default_skills: t.default_skills,
+    }));
+    res.json({ templates: result });
+  });
+
+  app.get("/api/agents/runtime", (_req, res) => {
+    res.json({ agents: runtime.getStatus() });
+  });
+
+  app.post("/api/agents", (req, res) => {
+    const { template, name, skills, color, initials, agent_id } = req.body ?? {};
+    if (!template || typeof template !== "string") {
+      res.status(400).json({ error: "template (string) is required" });
+      return;
+    }
+    if (!name || typeof name !== "string") {
+      res.status(400).json({ error: "name (string) is required" });
+      return;
+    }
+    try {
+      const overrides: any = {};
+      if (skills && Array.isArray(skills)) overrides.skills = skills;
+      if (color && typeof color === "string") overrides.color = color;
+      if (initials && typeof initials === "string") overrides.initials = initials;
+      if (agent_id && typeof agent_id === "string") overrides.agent_id = agent_id;
+      const entry = runtime.addAgent(template, name.trim(), Object.keys(overrides).length ? overrides : undefined);
+      res.json({ ok: true, agent: entry });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message ?? String(err) });
+    }
+  });
+
+  app.delete("/api/agents/:agentId", async (req, res) => {
+    const id = req.params.agentId.trim().toLowerCase();
+    try {
+      await runtime.removeAgent(id);
+      res.json({ ok: true, agent_id: id });
+    } catch (err: any) {
+      const status = err.message?.includes("mandatory") ? 403 : 400;
+      res.status(status).json({ error: err.message ?? String(err) });
+    }
+  });
+
+  app.post("/api/agents/:agentId/toggle", (req, res) => {
+    const id = req.params.agentId.trim().toLowerCase();
+    const { enabled } = req.body ?? {};
+    if (typeof enabled !== "boolean") {
+      res.status(400).json({ error: "enabled (boolean) is required" });
+      return;
+    }
+    try {
+      const entry = runtime.toggleAgent(id, enabled);
+      res.json({ ok: true, agent: entry });
+    } catch (err: any) {
+      const status = err.message?.includes("mandatory") ? 403 : 400;
+      res.status(status).json({ error: err.message ?? String(err) });
+    }
+  });
+
+  app.post("/api/agents/:agentId/pause", (req, res) => {
+    const id = req.params.agentId.trim().toLowerCase();
+    try {
+      runtime.pauseAgent(id);
+      res.json({ ok: true, agent_id: id, status: "paused" });
+    } catch (err: any) {
+      const status = err.message?.includes("mandatory") ? 403 : 400;
+      res.status(status).json({ error: err.message ?? String(err) });
+    }
+  });
+
+  app.post("/api/agents/:agentId/resume", (req, res) => {
+    const id = req.params.agentId.trim().toLowerCase();
+    try {
+      runtime.resumeAgent(id);
+      res.json({ ok: true, agent_id: id, status: "running" });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message ?? String(err) });
+    }
   });
 
   // â"€â"€ SSE: real-time agent streaming â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€

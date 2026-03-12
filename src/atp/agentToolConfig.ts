@@ -7,6 +7,7 @@
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { config } from "../config.js";
+import { loadRoster, type RosterEntry } from "../ar/roster.js";
 
 const CONFIG_PATH = join(config.dataDir, "agent-tool-config.json");
 
@@ -89,196 +90,119 @@ const SPECIALIST_TASK_TOOLS: ToolDef[] = [
   { id: "self_assign_task",   name: "Self-Assign Task",   description: "Create & claim a task from direct request",  group: "Task Management" },
 ];
 
-// ── Full agent catalog ────────────────────────────────────────────────────────
+// ── Tool profile to ToolDef[] mapping ─────────────────────────────────────────
 
-export const AGENT_PROFILES: AgentProfile[] = [
-  {
-    agent_id: "pm",
-    name: "Arjun Sharma",
-    role: "Project Manager",
-    department: "Management",
-    initials: "AS",
-    color: "#1158c7",
-    implemented: true,
-    tools: [
-      { id: "create_and_assign_task",  name: "Create & Assign Task", description: "Create a task and auto-assign to an agent",  group: "Task Management" },
-      { id: "start_task",              name: "Start Task",           description: "Trigger a pending task by ID",               group: "Task Management" },
-      { id: "start_tasks",             name: "Start Multiple Tasks", description: "Trigger multiple pending tasks at once",      group: "Task Management" },
-      { id: "reschedule_task",         name: "Reschedule Task",      description: "Change a task's scheduled date",             group: "Task Management" },
-      { id: "send_task_message",       name: "Send Task Message",    description: "Message the agent assigned to a task",       group: "Task Management" },
-      { id: "send_priority_message",   name: "Priority Message",     description: "Send a priority interrupt to an agent",      group: "Task Management" },
-      { id: "check_task_status",       name: "Check Task Status",    description: "Check current status of any task",           group: "Task Management" },
-      { id: "list_all_tasks",          name: "List All Tasks",       description: "View the full ATP task board",               group: "Task Management" },
-      { id: "read_messages",           name: "Read Messages",        description: "Read notifications from agents",             group: "Task Management" },
-      { id: "restart_task",            name: "Restart Task",         description: "Force-restart a stuck or stalled task",      group: "Task Management" },
-      { id: "cancel_task",             name: "Cancel Task",          description: "Cancel a task (keeps record)",               group: "Task Management" },
-      { id: "delete_task",             name: "Delete Task",          description: "Permanently delete a completed task",        group: "Task Management" },
-      { id: "interrupt_agent",         name: "Interrupt Agent",      description: "Abort a running agent mid-stream",           group: "Task Management" },
-      { id: "unblock_agent",           name: "Unblock Agent",        description: "Clear interrupt flags on an agent",          group: "Task Management" },
-      { id: "view_employee_directory", name: "Employee Directory",   description: "List all employees and their status",     group: "HR" },
-      { id: "lookup_employee",         name: "Lookup Employee",      description: "Get full details on any employee",        group: "HR" },
-      { id: "set_employee_status",     name: "Set Employee Status",  description: "Mark an employee available/busy/offline",    group: "HR" },
-      ...READONLY_FILE_TOOLS,
-      ...MEMORY_TOOLS,
-      ...MESSAGING_TOOLS,
-      DATE_TOOL,
-      ...WEB_TOOLS,
-    ],
-  },
-  {
-    agent_id: "architect",
-    name: "Priya Nair",
-    role: "Architect",
-    department: "Engineering",
-    initials: "PN",
-    color: "#e36209",
-    implemented: true,
-    tools: [
-      ...SPECIALIST_TASK_TOOLS,
-      ...READONLY_FILE_TOOLS,
-      ...MEMORY_TOOLS,
-      ...AGENT_MESSAGING_TOOLS,
-      DATE_TOOL,
-      ...WEB_TOOLS,
-    ],
-  },
-  {
-    agent_id: "ba",
-    name: "Kavya Nair",
-    role: "Business Analyst",
-    department: "Product",
-    initials: "KN",
-    color: "#7928ca",
-    implemented: true,
-    tools: [
-      ...SPECIALIST_TASK_TOOLS,
-      ...BA_FILE_TOOLS,
-      ...MEMORY_TOOLS,
-      ...AGENT_MESSAGING_TOOLS,
-      DATE_TOOL,
-      ...WEB_TOOLS,
-    ],
-  },
-  {
-    agent_id: "researcher",
-    name: "Shreya Joshi",
-    role: "Researcher",
-    department: "Product",
-    initials: "SJ",
-    color: "#0891b2",
-    implemented: true,
-    tools: [
-      ...SPECIALIST_TASK_TOOLS,
-      ...READONLY_FILE_TOOLS,
-      ...MEMORY_TOOLS,
-      ...AGENT_MESSAGING_TOOLS,
-      DATE_TOOL,
-      ...WEB_TOOLS,
-    ],
-  },
-  {
-    agent_id: "dev",
-    name: "Rohan Mehta",
-    role: "Senior Developer",
-    department: "Engineering",
-    initials: "RM",
-    color: "#3fb950",
-    implemented: true,
-    tools: [
-      ...SPECIALIST_TASK_TOOLS,
-      ...CODING_FILE_TOOLS,
-      { id: "glob", name: "glob", description: "Find files matching a glob pattern", group: "Files" },
-      ...MEMORY_TOOLS,
-      ...AGENT_MESSAGING_TOOLS,
-      DATE_TOOL,
-      ...WEB_TOOLS,
-    ],
-  },
-  {
-    agent_id: "qa",
-    name: "Preethi Raj",
-    role: "QA Engineer",
-    department: "Engineering",
-    initials: "PR",
-    color: "#f59e0b",
-    implemented: true,
-    tools: [
-      ...SPECIALIST_TASK_TOOLS,
-      ...READONLY_FILE_TOOLS,
-      { id: "bash", name: "bash", description: "Run test commands and scripts", group: "Files" },
-      ...MEMORY_TOOLS,
-      ...AGENT_MESSAGING_TOOLS,
-      DATE_TOOL,
-      ...WEB_TOOLS,
-      { id: "run_code_scan", name: "Run Code Scan", description: "Trigger SonarQube code scan via OCTO-FLOWS", group: "OCTO-Flows" },
-      { id: "run_flow", name: "Run OCTO-Flow", description: "Trigger any named OCTO-FLOW pipeline", group: "OCTO-Flows" },
-    ],
-  },
-  {
-    agent_id: "security",
-    name: "Vikram Singh",
-    role: "Security Engineer",
-    department: "Engineering",
-    initials: "VS",
-    color: "#ef4444",
-    implemented: true,
-    tools: [
-      ...SPECIALIST_TASK_TOOLS,
-      ...READONLY_FILE_TOOLS,
-      { id: "bash", name: "bash", description: "Run security tools and scans", group: "Files" },
-      ...MEMORY_TOOLS,
-      ...AGENT_MESSAGING_TOOLS,
-      DATE_TOOL,
-      ...WEB_TOOLS,
-      { id: "run_sast_scan", name: "Run SAST Scan", description: "Trigger Semgrep SAST scan via OCTO-FLOWS", group: "OCTO-Flows" },
-      { id: "run_secret_scan", name: "Run Secret Scan", description: "Trigger Gitleaks secret scan via OCTO-FLOWS", group: "OCTO-Flows" },
-      { id: "run_sca_scan", name: "Run SCA Scan", description: "Trigger Trivy dependency vulnerability scan via OCTO-FLOWS", group: "OCTO-Flows" },
-      { id: "run_flow", name: "Run OCTO-Flow", description: "Trigger any named OCTO-FLOW pipeline", group: "OCTO-Flows" },
-    ],
-  },
-  {
-    agent_id: "devops",
-    name: "Aditya Kumar",
-    role: "DevOps Engineer",
-    department: "Engineering",
-    initials: "AK",
-    color: "#8b5cf6",
-    implemented: true,
-    tools: [
-      ...SPECIALIST_TASK_TOOLS,
-      ...CODING_FILE_TOOLS,
-      { id: "grep", name: "grep", description: "Search files", group: "Files" },
-      { id: "find", name: "find", description: "Find files by pattern", group: "Files" },
-      { id: "ls",   name: "ls",   description: "List directory contents", group: "Files" },
-      ...MEMORY_TOOLS,
-      ...AGENT_MESSAGING_TOOLS,
-      DATE_TOOL,
-      ...WEB_TOOLS,
-    ],
-  },
-  {
-    agent_id: "techwriter",
-    name: "Anjali Patel",
-    role: "Tech Writer",
-    department: "Product",
-    initials: "AP",
-    color: "#ec4899",
-    implemented: true,
-    tools: [
-      ...SPECIALIST_TASK_TOOLS,
-      { id: "read",  name: "read",  description: "Read files from disk",        group: "Files" },
-      { id: "write", name: "write", description: "Write documentation files",   group: "Files" },
-      { id: "edit",  name: "edit",  description: "Edit existing documents",     group: "Files" },
-      { id: "grep",  name: "grep",  description: "Search file content",         group: "Files" },
-      { id: "find",  name: "find",  description: "Find files by pattern",       group: "Files" },
-      { id: "ls",    name: "ls",    description: "List directory contents",     group: "Files" },
-      ...MEMORY_TOOLS,
-      ...AGENT_MESSAGING_TOOLS,
-      DATE_TOOL,
-      ...WEB_TOOLS,
-    ],
-  },
+const GIT_TOOLS: ToolDef[] = [
+  { id: "git_init",   name: "Git Init",   description: "Initialize git repo in a project folder",  group: "Git" },
+  { id: "git_status", name: "Git Status", description: "Show git status for a project",            group: "Git" },
+  { id: "git_diff",   name: "Git Diff",   description: "Show file changes in a project",           group: "Git" },
+  { id: "git_add",    name: "Git Add",    description: "Stage files for commit",                   group: "Git" },
+  { id: "git_commit", name: "Git Commit", description: "Commit staged changes",                    group: "Git" },
+  { id: "git_log",    name: "Git Log",    description: "Show commit history",                       group: "Git" },
 ];
+
+const GLOB_TOOL: ToolDef = { id: "glob", name: "glob", description: "Find files matching a glob pattern", group: "Files" };
+
+const SCOPED_WRITE_TOOLS: ToolDef[] = [
+  { id: "write", name: "write", description: "Write .md and .mmd files only", group: "Files" },
+  { id: "edit",  name: "edit",  description: "Edit .md and .mmd files only",  group: "Files" },
+];
+
+const QA_DOMAIN_TOOLS: ToolDef[] = [
+  { id: "run_code_scan", name: "Run Code Scan", description: "Trigger SonarQube code scan via OCTO-FLOWS", group: "OCTO-Flows" },
+  { id: "run_flow", name: "Run OCTO-Flow", description: "Trigger any named OCTO-FLOW pipeline", group: "OCTO-Flows" },
+];
+
+const SECURITY_DOMAIN_TOOLS: ToolDef[] = [
+  { id: "run_sast_scan", name: "Run SAST Scan", description: "Trigger Semgrep SAST scan via OCTO-FLOWS", group: "OCTO-Flows" },
+  { id: "run_secret_scan", name: "Run Secret Scan", description: "Trigger Gitleaks secret scan via OCTO-FLOWS", group: "OCTO-Flows" },
+  { id: "run_sca_scan", name: "Run SCA Scan", description: "Trigger Trivy dependency vulnerability scan via OCTO-FLOWS", group: "OCTO-Flows" },
+  { id: "run_flow", name: "Run OCTO-Flow", description: "Trigger any named OCTO-FLOW pipeline", group: "OCTO-Flows" },
+];
+
+/** Build ToolDef[] for a specialist based on their roster entry. */
+function buildToolDefs(entry: RosterEntry): ToolDef[] {
+  const tools: ToolDef[] = [...SPECIALIST_TASK_TOOLS];
+
+  // File tools based on tool_profile
+  switch (entry.tool_profile) {
+    case "coding":
+      tools.push(...CODING_FILE_TOOLS);
+      break;
+    case "coding_extended":
+      tools.push(...CODING_FILE_TOOLS);
+      // coding_extended adds grep/find/ls on top of coding (bash already included)
+      tools.push(
+        { id: "grep", name: "grep", description: "Search file content", group: "Files" },
+        { id: "find", name: "find", description: "Find files by pattern", group: "Files" },
+        { id: "ls",   name: "ls",   description: "List directory contents", group: "Files" },
+      );
+      break;
+    case "scoped_write":
+      tools.push(...READONLY_FILE_TOOLS, ...SCOPED_WRITE_TOOLS);
+      break;
+    case "ba":
+      tools.push(...BA_FILE_TOOLS);
+      break;
+    default:
+      tools.push(...READONLY_FILE_TOOLS);
+  }
+
+  // Capability flags
+  if (entry.capabilities?.git) tools.push(...GIT_TOOLS);
+  if (entry.capabilities?.glob) tools.push(GLOB_TOOL);
+
+  // Domain tools
+  if (entry.domain_tools?.includes("qa")) tools.push(...QA_DOMAIN_TOOLS);
+  if (entry.domain_tools?.includes("security")) tools.push(...SECURITY_DOMAIN_TOOLS);
+
+  tools.push(...MEMORY_TOOLS, ...AGENT_MESSAGING_TOOLS, DATE_TOOL, ...WEB_TOOLS);
+  return tools;
+}
+
+/** PM tools — hardcoded since PM is a unique role with its own tool set. */
+const PM_TOOLS: ToolDef[] = [
+  { id: "create_and_assign_task",  name: "Create & Assign Task", description: "Create a task and auto-assign to an agent",  group: "Task Management" },
+  { id: "start_task",              name: "Start Task",           description: "Trigger a pending task by ID",               group: "Task Management" },
+  { id: "start_tasks",             name: "Start Multiple Tasks", description: "Trigger multiple pending tasks at once",      group: "Task Management" },
+  { id: "reschedule_task",         name: "Reschedule Task",      description: "Change a task's scheduled date",             group: "Task Management" },
+  { id: "send_task_message",       name: "Send Task Message",    description: "Message the agent assigned to a task",       group: "Task Management" },
+  { id: "send_priority_message",   name: "Priority Message",     description: "Send a priority interrupt to an agent",      group: "Task Management" },
+  { id: "check_task_status",       name: "Check Task Status",    description: "Check current status of any task",           group: "Task Management" },
+  { id: "list_all_tasks",          name: "List All Tasks",       description: "View the full ATP task board",               group: "Task Management" },
+  { id: "read_messages",           name: "Read Messages",        description: "Read notifications from agents",             group: "Task Management" },
+  { id: "restart_task",            name: "Restart Task",         description: "Force-restart a stuck or stalled task",      group: "Task Management" },
+  { id: "cancel_task",             name: "Cancel Task",          description: "Cancel a task (keeps record)",               group: "Task Management" },
+  { id: "delete_task",             name: "Delete Task",          description: "Permanently delete a completed task",        group: "Task Management" },
+  { id: "interrupt_agent",         name: "Interrupt Agent",      description: "Abort a running agent mid-stream",           group: "Task Management" },
+  { id: "unblock_agent",           name: "Unblock Agent",        description: "Clear interrupt flags on an agent",          group: "Task Management" },
+  { id: "view_employee_directory", name: "Employee Directory",   description: "List all employees and their status",     group: "HR" },
+  { id: "lookup_employee",         name: "Lookup Employee",      description: "Get full details on any employee",        group: "HR" },
+  { id: "set_employee_status",     name: "Set Employee Status",  description: "Mark an employee available/busy/offline",    group: "HR" },
+  ...READONLY_FILE_TOOLS,
+  ...MEMORY_TOOLS,
+  ...MESSAGING_TOOLS,
+  DATE_TOOL,
+  ...WEB_TOOLS,
+];
+
+// ── Full agent catalog — built dynamically from roster.json ──────────────────
+
+function buildAgentProfiles(): AgentProfile[] {
+  const roster = loadRoster();
+  return roster.agents.filter((e) => e.enabled).map((entry) => ({
+    agent_id: entry.agent_id,
+    name: entry.name,
+    role: entry.role,
+    department: entry.department,
+    initials: entry.initials,
+    color: entry.color,
+    implemented: true,
+    tools: entry.category === "pm" ? PM_TOOLS : buildToolDefs(entry),
+  }));
+}
+
+export const AGENT_PROFILES: AgentProfile[] = buildAgentProfiles();
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 

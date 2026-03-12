@@ -21,6 +21,8 @@ export interface Employee {
   agent_key: string;
   status: string;
   department?: string;
+  color?: string;
+  initials?: string;
 }
 
 export interface VECEvent {
@@ -91,4 +93,22 @@ export interface MessageFlowEntry {
   priority: string;
   task_id: string;
   ts: string;
+}
+
+export interface AgentRuntimeEntry {
+  agent_id: string;
+  employee_id: string;
+  name: string;
+  template: string;
+  status: "running" | "paused";
+  enabled: boolean;
+}
+
+export interface RoleTemplateSummary {
+  id: string;
+  role: string;
+  department: string;
+  category: "pm" | "specialist";
+  mandatory: boolean;
+  default_skills: string[];
 }

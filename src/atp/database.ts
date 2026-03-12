@@ -8,6 +8,7 @@ import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
 import { config } from "../config.js";
+import { loadRoster } from "../ar/roster.js";
 import {
   Priority,
   TaskStatus,
@@ -84,62 +85,19 @@ function rowToEmployee(row: Record<string, unknown>): Employee {
   };
 }
 
-const SEED_EMPLOYEES = [
-  {
-    employee_id: "EMP-001", agent_id: "pm",
-    name: "Arjun Sharma", designation: "Project Manager",
-    department: "Management", hierarchy_level: 1, reports_to: "",
-    skills: "planning,delegation,risk-management,communication",
-  },
-  {
-    employee_id: "EMP-002", agent_id: "architect",
-    name: "Priya Nair", designation: "Solutions Architect",
-    department: "Engineering", hierarchy_level: 2, reports_to: "EMP-001",
-    skills: "system-design,database-schema,api-design,tech-stack",
-  },
-  {
-    employee_id: "EMP-003", agent_id: "ba",
-    name: "Kavya Nair", designation: "Business Analyst",
-    department: "Analysis", hierarchy_level: 3, reports_to: "EMP-001",
-    skills: "requirements,user-stories,gap-analysis,kpis,process-mapping",
-  },
-  {
-    employee_id: "EMP-004", agent_id: "researcher",
-    name: "Shreya Joshi", designation: "Research Specialist",
-    department: "Analysis", hierarchy_level: 3, reports_to: "EMP-001",
-    skills: "technology-research,best-practices,security-research,comparative-analysis",
-  },
-  {
-    employee_id: "EMP-005", agent_id: "dev",
-    name: "Rohan Mehta", designation: "Senior Developer",
-    department: "Engineering", hierarchy_level: 3, reports_to: "EMP-002",
-    skills: "python,javascript,typescript,code-review,unit-testing,debugging,refactoring",
-  },
-  {
-    employee_id: "EMP-006", agent_id: "qa",
-    name: "Preethi Raj", designation: "QA Engineer",
-    department: "Engineering", hierarchy_level: 3, reports_to: "EMP-002",
-    skills: "test-planning,test-cases,bug-reporting,coverage-analysis",
-  },
-  {
-    employee_id: "EMP-007", agent_id: "security",
-    name: "Vikram Singh", designation: "Security Engineer",
-    department: "Engineering", hierarchy_level: 3, reports_to: "EMP-002",
-    skills: "vulnerability-scanning,dependency-audit,code-security,owasp",
-  },
-  {
-    employee_id: "EMP-008", agent_id: "devops",
-    name: "Aditya Kumar", designation: "DevOps Engineer",
-    department: "Engineering", hierarchy_level: 3, reports_to: "EMP-002",
-    skills: "ci-cd,docker,kubernetes,deployment,monitoring,infrastructure",
-  },
-  {
-    employee_id: "EMP-009", agent_id: "techwriter",
-    name: "Anjali Patel", designation: "Technical Writer",
-    department: "Documentation", hierarchy_level: 3, reports_to: "EMP-001",
-    skills: "api-docs,readme,user-guides,deployment-guides,changelogs",
-  },
-];
+/** Build seed data from roster.json — no more hardcoded employee list. */
+function getSeedEmployees() {
+  return loadRoster().agents.filter((e) => e.enabled).map((e) => ({
+    employee_id: e.employee_id,
+    agent_id: e.agent_id,
+    name: e.name,
+    designation: e.designation,
+    department: e.department,
+    hierarchy_level: e.hierarchy_level,
+    reports_to: e.reports_to,
+    skills: e.skills.join(","),
+  }));
+}
 
 class ATPDatabaseClass {
   private db: Database.Database;
@@ -404,7 +362,7 @@ class ATPDatabaseClass {
     // knows not to contact them. Add an agent_id here to remove it from PM's roster.
     const OFFLINE_AGENTS = new Set<string>([]);
 
-    for (const emp of SEED_EMPLOYEES) {
+    for (const emp of getSeedEmployees()) {
       this.registerEmployee(emp);
       // Update name if it changed (keeps existing records in sync with new seed data)
       this.db

@@ -7,6 +7,7 @@ import fs from "fs";
 import path from "path";
 import { config } from "../config.js";
 import { founder } from "../identity.js";
+import { loadRoster, clearRosterCache } from "../ar/roster.js";
 import type { AgentMessage } from "./models.js";
 
 const QUEUE_PATH = path.join(config.dataDir, "agent_messages.json");
@@ -26,22 +27,52 @@ export function unregisterInboxWaker(agentId: string): void {
   inboxWakers.delete(agentId.trim().toLowerCase());
 }
 
-export const AGENT_DISPLAY_NAMES: Record<string, string> = {
-  pm: "Arjun Sharma (PM)",
-  ba: "Kavya Nair (BA)",
-  dev: "Rohan Mehta (Dev)",
-  qa: "Preethi Raj (QA)",
-  security: "Vikram Singh (Security)",
-  devops: "Aditya Kumar (DevOps)",
-  techwriter: "Anjali Patel (TechWriter)",
-  architect: "Priya Nair (Architect)",
-  researcher: "Shreya Joshi (Researcher)",
-  user: founder.displayName,
-};
+// ── Display names & agent IDs — built from roster.json ───────────────────────
 
-export const ALL_AGENT_IDS = new Set([
-  "pm", "ba", "dev", "qa", "security", "devops", "techwriter", "architect", "researcher", "user",
-]);
+function _buildDisplayNames(): Record<string, string> {
+  const names: Record<string, string> = {};
+  for (const entry of loadRoster().agents) {
+    if (!entry.enabled) continue;
+    const shortRole = entry.role.split(" ").pop() ?? entry.role;
+    names[entry.agent_id] = `${entry.name} (${shortRole})`;
+  }
+  names.user = founder.displayName;
+  return names;
+}
+
+/**
+ * Roster-driven display names. Mutable — call refreshAgentMeta() after roster changes.
+ * We mutate the object in-place so existing imports see the updated values.
+ */
+export const AGENT_DISPLAY_NAMES: Record<string, string> = _buildDisplayNames();
+
+function _buildAllAgentIds(): Set<string> {
+  const ids = new Set<string>();
+  for (const entry of loadRoster().agents) {
+    if (entry.enabled) ids.add(entry.agent_id);
+  }
+  ids.add("user");
+  return ids;
+}
+
+/** Roster-driven agent ID set. Mutable — call refreshAgentMeta() after roster changes. */
+export const ALL_AGENT_IDS: Set<string> = _buildAllAgentIds();
+
+/**
+ * Rebuild display names and agent ID set from the current roster.
+ * Call after any roster mutation (add/remove/toggle agent).
+ */
+export function refreshAgentMeta(): void {
+  clearRosterCache();
+
+  // Mutate AGENT_DISPLAY_NAMES in-place
+  for (const key of Object.keys(AGENT_DISPLAY_NAMES)) delete AGENT_DISPLAY_NAMES[key];
+  Object.assign(AGENT_DISPLAY_NAMES, _buildDisplayNames());
+
+  // Mutate ALL_AGENT_IDS in-place
+  ALL_AGENT_IDS.clear();
+  for (const id of _buildAllAgentIds()) ALL_AGENT_IDS.add(id);
+}
 
 function ensureFile(): void {
   if (!fs.existsSync(QUEUE_PATH)) {

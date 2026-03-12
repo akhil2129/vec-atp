@@ -39,3 +39,9 @@ export async function postApi(url: string, body: unknown) {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
+
+export async function deleteApi(url: string) {
+  const res = await fetch(url, { method: "DELETE" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}

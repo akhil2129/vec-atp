@@ -34,3 +34,6 @@ self.md
 # SQLite WAL files (if any slip through)
 *.db-shm
 *.db-wal
+
+# Internal TO-DOs — personal tracking, not source
+TO-DOs/

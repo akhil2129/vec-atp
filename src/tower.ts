@@ -7,8 +7,9 @@
 import readline from "readline";
 import fs from "fs";
 
-import { config, sharedWorkspace, agentWorkspace, WORKSPACE_DIRS } from "./config.js";
-import { ALL_AGENT_IDS } from "./agentIds.js";
+import { config, sharedWorkspace, agentWorkspace, getWorkspaceDirs } from "./config.js";
+import { getAllAgentIds } from "./ar/roster.js";
+import { AgentRuntime } from "./atp/agentRuntime.js";
 import { founder } from "./identity.js";
 import { loadAgentMemory, isFirstInteraction, markFirstInteractionDone } from "./memory/agentMemory.js";
 import { ATPDatabase } from "./atp/database.js";
@@ -16,18 +17,10 @@ import { MessageQueue } from "./atp/messageQueue.js";
 import { AgentMessageQueue, AGENT_DISPLAY_NAMES } from "./atp/agentMessageQueue.js";
 import { EventLog } from "./atp/eventLog.js";
 import { EventType } from "./atp/models.js";
-import { startAllInboxLoops, startPmLiveLoop } from "./atp/inboxLoop.js";
+import { startPmLiveLoop } from "./atp/inboxLoop.js";
 import type { VECAgent } from "./atp/inboxLoop.js";
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
 
-import { BAAgent } from "./agents/baAgent.js";
-import { DevAgent } from "./agents/devAgent.js";
-import { QAAgent } from "./agents/qaAgent.js";
-import { SecurityAgent } from "./agents/securityAgent.js";
-import { DevOpsAgent } from "./agents/devopsAgent.js";
-import { TechWriterAgent } from "./agents/techwriterAgent.js";
-import { ArchitectAgent } from "./agents/architectAgent.js";
-import { ResearcherAgent } from "./agents/researcherAgent.js";
 import { PMAgent } from "./agents/pmAgent.js";
 import { startDashboardServer } from "./dashboard/server.js";
 import { releaseDueTasks } from "./tools/pm/taskTools.js";
@@ -43,7 +36,7 @@ import { initMCP, shutdownMCP } from "./mcp/mcpBridge.js";
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function ensureDirs(): void {
-  for (const dir of [config.dataDir, config.memoryDir, ...WORKSPACE_DIRS]) {
+  for (const dir of [config.dataDir, config.memoryDir, ...getWorkspaceDirs()]) {
     fs.mkdirSync(dir, { recursive: true });
   }
 }
@@ -219,7 +212,7 @@ async function main(): Promise<void> {
     ATPDatabase.resetEmployeeStatuses();
     MessageQueue.clear();
     UserChatLog.clear();
-    for (const id of ALL_AGENT_IDS) clearAgentHistory(id);
+    for (const id of getAllAgentIds()) clearAgentHistory(id);
     try {
       fs.rmSync(config.memoryDir, { recursive: true, force: true });
       fs.mkdirSync(config.memoryDir, { recursive: true });
@@ -240,42 +233,21 @@ async function main(): Promise<void> {
   // It is only cleared on full /reset.
   EventLog.clear();
 
-  // 3. Create specialist agents
+  // 3. Create specialist agents dynamically from roster.json
   const deps = {
     db: ATPDatabase,
     pmQueue: MessageQueue,
     agentQueue: AgentMessageQueue,
   };
 
-  const baAgent = new BAAgent(deps);
-  const devAgent = new DevAgent(deps);
-  const qaAgent = new QAAgent(deps);
-  const securityAgent = new SecurityAgent(deps);
-  const devopsAgent = new DevOpsAgent(deps);
-  const techwriterAgent = new TechWriterAgent(deps);
-  const architectAgent = new ArchitectAgent(deps);
-  const researcherAgent = new ResearcherAgent(deps);
-
-  // 4. Build agent registry (all specialist agents PM can dispatch to)
-  const agentRegistry = new Map<string, VECAgent>([
-    ["ba", baAgent],
-    ["dev", devAgent],
-    ["qa", qaAgent],
-    ["security", securityAgent],
-    ["devops", devopsAgent],
-    ["techwriter", techwriterAgent],
-    ["architect", architectAgent],
-    ["researcher", researcherAgent],
-  ]);
-
-  // 5. Create PM agent with full deps + agent registry
-  const pmAgent = new PMAgent({ ...deps, agents: agentRegistry });
-
-  // 5b. Full agents map — includes PM so dashboard can interrupt/steer all agents
-  const allAgents = new Map<string, VECAgent>([
-    ["pm", pmAgent],
-    ...agentRegistry,
-  ]);
+  // 4. Create PM agent first (needs specialist registry for message routing)
+  //    Then build AgentRuntime which creates all specialists from roster.
+  //    AgentRuntime.allAgents is the shared Map used by dashboard + PM.
+  const pmAgentDeps = { ...deps, agents: new Map<string, VECAgent>() };
+  const pmAgent = new PMAgent(pmAgentDeps);
+  const runtime = new AgentRuntime(deps, pmAgent);
+  // Patch PM's agent registry reference so it can route messages to specialists
+  pmAgentDeps.agents = runtime.getSpecialistRegistry();
 
   // 6. Attach streaming output to PM agent
   attachPmStreaming(pmAgent);
@@ -289,25 +261,8 @@ async function main(): Promise<void> {
     try { await pmAgent.runSunset(sunsetCheck.sessionDate); } finally { suppressChatLog = false; }
   }
 
-  // 7. Start background inbox loops.
-  //    afterPromptFactory: after each inbox prompt, if the agent left any tasks
-  //    in_progress without calling update_my_task, route them through executeTask()
-  //    so the re-prompt loop kicks in and drives the task to completion.
-  const specialistHandles = startAllInboxLoops(
-    agentRegistry,
-    undefined,
-    (agentId, agent) => {
-      if (typeof agent.executeTask !== "function") return undefined;
-      return async () => {
-        const inProgress = ATPDatabase.getAllTasks("in_progress").filter(
-          (t) => t.agent_id === agentId
-        );
-        for (const task of inProgress) {
-          await agent.executeTask!(task.task_id).catch(() => {});
-        }
-      };
-    }
-  );
+  // 7. Start background inbox loops via AgentRuntime.
+  const specialistHandles = runtime.startAllLoops();
   const pmHandles = startPmLiveLoop(pmAgent, config.pmProactiveIntervalSecs * 1_000);
   const allHandles: NodeJS.Timeout[] = [...specialistHandles, ...pmHandles];
 
@@ -323,7 +278,7 @@ async function main(): Promise<void> {
       return age > STALE_TASK_MS;
     });
     for (const task of staleTasks) {
-      const agent = agentRegistry.get(task.agent_id);
+      const agent = runtime.allAgents.get(task.agent_id);
       if (agent) agent.abort(); // stop any hung LLM call
       ATPDatabase.updateTaskStatus(
         task.task_id, "failed",
@@ -345,7 +300,7 @@ async function main(): Promise<void> {
     db: ATPDatabase,
     pmQueue: MessageQueue,
     agentQueue: AgentMessageQueue,
-    agents: agentRegistry,
+    agents: runtime.getSpecialistRegistry(),
   };
   releaseDueTasks(schedulerDeps); // run immediately on startup
   const schedulerHandle = setInterval(() => releaseDueTasks(schedulerDeps), 60 * 60_000);
@@ -357,6 +312,7 @@ async function main(): Promise<void> {
 
   function shutdown(): void {
     console.log("\nShutting down VEC... goodbye.");
+    runtime.shutdown();
     for (const h of allHandles) clearInterval(h);
     shutdownMCP().catch(() => {});
     process.exit(0);
@@ -366,7 +322,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 
   // 9. Start dashboard HTTP server
-  startDashboardServer(allAgents);
+  startDashboardServer(runtime);
 
   // 10. Start Telegram channel (optional — requires TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID)
   const telegram = createTelegramChannel(pmAgent);
@@ -600,7 +556,7 @@ async function main(): Promise<void> {
         if (iKey) {
           const r = reason || "Interrupted by founder";
           // Native abort — stops LLM generation mid-stream
-          agentRegistry.get(iKey)?.abort();
+          runtime.allAgents.get(iKey)?.abort();
           // Flag fallback — caught at next tool boundary
           AgentInterrupt.request(iKey, r);
           const name = AGENT_DISPLAY_NAMES[iKey] ?? iKey;
@@ -640,7 +596,7 @@ async function main(): Promise<void> {
         }
 
         // 1. Abort all running agents
-        for (const [, agent] of allAgents) agent.abort();
+        for (const [, agent] of runtime.allAgents) agent.abort();
 
         // 2. Clear ATP tasks + reset employee statuses
         const cleared = ATPDatabase.clearAllTasks();
@@ -656,8 +612,8 @@ async function main(): Promise<void> {
         UserChatLog.clear();
 
         // 5. Clear agent histories (disk + in-memory)
-        for (const id of ALL_AGENT_IDS) clearAgentHistory(id);
-        for (const [, agent] of allAgents) agent.clearHistory();
+        for (const id of getAllAgentIds()) clearAgentHistory(id);
+        for (const [, agent] of runtime.allAgents) agent.clearHistory();
 
         // 6. Wipe all agent memory files (STM, LTM, SLTM)
         try {

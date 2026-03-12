@@ -18,7 +18,7 @@ import path from "path";
 import { Type } from "@mariozechner/pi-ai";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { config } from "../../config.js";
-import { getEmployeeId } from "../../agentIds.js";
+import { getEmployeeId } from "../../ar/roster.js";
 
 /** Full coding tools: read, bash, edit, write — for Dev/DevOps agents. */
 export function getCodingTools(cwd?: string): AgentTool[] {

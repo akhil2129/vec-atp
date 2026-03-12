@@ -2,7 +2,7 @@ import "dotenv/config";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { SPECIALIST_AGENT_IDS, getEmployeeId } from "./agentIds.js";
+import { getEmployeeId, getSpecialistEntries } from "./ar/roster.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const PROJECT_ROOT = join(__dirname, "..");
@@ -98,11 +98,13 @@ export function agentWorkspace(agentId: string): string {
   return join(config.workspace, "agents", getEmployeeId(agentId));
 }
 
-/** All workspace directories that must exist at startup. */
-export const WORKSPACE_DIRS = [
-  config.workspace,
-  sharedWorkspace,
-  projectsWorkspace,
-  // specialist agent folders
-  ...SPECIALIST_AGENT_IDS.map(agentWorkspace),
-];
+/** Build workspace directory list dynamically from roster. */
+export function getWorkspaceDirs(): string[] {
+  return [
+    config.workspace,
+    sharedWorkspace,
+    projectsWorkspace,
+    // specialist agent folders — driven by roster.json
+    ...getSpecialistEntries().map((e) => join(config.workspace, "agents", e.employee_id)),
+  ];
+}

@@ -5,17 +5,17 @@ import Sidebar, { type View } from "./components/Sidebar";
 import KanbanView from "./views/KanbanView";
 import OverviewView from "./views/OverviewView";
 import EventsView from "./views/EventsView";
-import QueueView from "./views/QueueView";
+import SnoopView from "./views/QueueView";
 import DirectoryView from "./views/DirectoryView";
 import ChatView from "./views/ChatView";
-import ActivityView from "./views/ActivityView";
+
 import LiveView from "./views/LiveView";
 import SettingsView from "./views/SettingsView";
 
 export default function App() {
   const [activeView, setActiveViewRaw] = useState<View>(() => {
     const saved = localStorage.getItem("active-view");
-    return saved && ["overview","activity","kanban","events","queue","directory","chat","live","settings"].includes(saved)
+    return saved && ["overview","kanban","events","snoop","directory","chat","live","settings"].includes(saved)
       ? (saved as View)
       : "kanban";
   });
@@ -39,10 +39,9 @@ export default function App() {
           border: "1px solid var(--border)",
         }}>
           {activeView === "overview" && <OverviewView />}
-          {activeView === "activity" && <ActivityView />}
           {activeView === "kanban" && <KanbanView />}
           {activeView === "events" && <EventsView />}
-          {activeView === "queue" && <QueueView />}
+          {activeView === "snoop" && <SnoopView />}
           {activeView === "directory" && <DirectoryView />}
           {activeView === "chat" && <ChatView />}
           {activeView === "live" && <LiveView />}

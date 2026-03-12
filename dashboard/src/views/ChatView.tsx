@@ -9,19 +9,8 @@ import type { ChatEntry, Employee } from "../types";
 
 const SYSTEM_PREFIXES = ["SUNSET_COMPLETE", "SUNRISE_", "NO_ACTION_REQUIRED", "MEMORY_UPDATED", "JOURNAL_"];
 
-const AGENT_COLORS: Record<string, string> = {
-  pm: "var(--purple)", dev: "var(--blue)", ba: "var(--green)",
-  qa: "var(--yellow)", security: "var(--red)", devops: "var(--orange)",
-  architect: "var(--cyan, #22d3ee)", researcher: "var(--teal, #2dd4bf)",
-  techwriter: "var(--pink, #f472b6)",
-};
-
 function getInitials(name: string): string {
   return name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2);
-}
-
-function getColor(key: string): string {
-  return AGENT_COLORS[key] ?? "var(--text-muted)";
 }
 
 function timeLabel(ts: string): string {
@@ -55,8 +44,8 @@ export default function ChatView() {
   const selectedEmp = agents.find((a) => a.agent_key === selectedAgent);
   const agentName = selectedEmp?.name ?? selectedAgent;
   const agentRole = selectedEmp?.role ?? "";
-  const agentColor = getColor(selectedAgent);
-  const agentInitials = selectedEmp ? getInitials(selectedEmp.name) : selectedAgent.slice(0, 2).toUpperCase();
+  const agentColor = selectedEmp?.color || "var(--text-muted)";
+  const agentInitials = selectedEmp?.initials || (selectedEmp ? getInitials(selectedEmp.name) : selectedAgent.slice(0, 2).toUpperCase());
 
   const entries = (allEntries ?? []).filter((e) => {
     if (!(e.from === "user" && e.to === selectedAgent) && !(e.from === selectedAgent && e.to === "user")) return false;
@@ -113,8 +102,8 @@ export default function ChatView() {
             const sel = selectedAgent === ag.agent_key;
             const last = lastMsg(ag.agent_key);
             const typing = activeAgents[ag.agent_key] ?? false;
-            const color = getColor(ag.agent_key);
-            const initials = getInitials(ag.name);
+            const color = ag.color || "var(--text-muted)";
+            const initials = ag.initials || getInitials(ag.name);
 
             return (
               <button

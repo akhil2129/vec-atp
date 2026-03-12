@@ -1,10 +1,9 @@
 import { useState } from "react";
 import {
   LayoutDashboard,
-  Activity,
   Columns3,
   CalendarDays,
-  List,
+  Eye,
   Users,
   MessageSquare,
   Palette,
@@ -17,10 +16,9 @@ import ThemeSwitcher from "./ThemeSwitcher";
 
 export type View =
   | "overview"
-  | "activity"
   | "kanban"
   | "events"
-  | "queue"
+  | "snoop"
   | "directory"
   | "chat"
   | "live"
@@ -32,10 +30,9 @@ const ICON = 18;
 const NAV_ITEMS: NavItem[] = [
   { id: "overview",  label: "Overview",  icon: <LayoutDashboard size={ICON} /> },
   { id: "kanban",    label: "Kanban",    icon: <Columns3 size={ICON} /> },
-  { id: "activity",  label: "Activity",  icon: <Activity size={ICON} /> },
   { id: "live",      label: "Live",      icon: <Monitor size={ICON} /> },
   { id: "events",    label: "Events",    icon: <CalendarDays size={ICON} /> },
-  { id: "queue",     label: "Queue",     icon: <List size={ICON} /> },
+  { id: "snoop",     label: "Snoop",     icon: <Eye size={ICON} /> },
   { id: "directory", label: "Directory", icon: <Users size={ICON} /> },
   { id: "chat",      label: "Chat",      icon: <MessageSquare size={ICON} /> },
   { id: "settings",  label: "Settings",  icon: <Settings size={ICON} /> },
