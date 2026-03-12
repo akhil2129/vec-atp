@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useMemo, useCallback } from "react";
-import { Monitor, Waypoints, Building2, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
-import { usePolling } from "../hooks/useApi";
+import { Monitor, Waypoints, Building2, ZoomIn, ZoomOut, RotateCcw, Navigation, StopCircle } from "lucide-react";
+import { usePolling, postApi } from "../hooks/useApi";
 import { useAgentStream, type ActivityEntry } from "../hooks/useSSE";
 import { useEmployees } from "../context/EmployeesContext";
 import type { Employee, MessageFlowEntry } from "../types";
@@ -114,14 +114,33 @@ function TimelineItem({ entry, isLast, color }: { entry: ActivityEntry; isLast: 
 }
 
 /* ── Per-agent card with timeline inside ── */
-function AgentTimelineCard({ name, role, items, active, color }: {
-  name: string; role: string; items: ActivityEntry[]; active: boolean; color: string;
+function AgentTimelineCard({ name, role, items, active, color, agentKey }: {
+  name: string; role: string; items: ActivityEntry[]; active: boolean; color: string; agentKey: string;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [steerMsg, setSteerMsg] = useState("");
+  const [showSteer, setShowSteer] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [items.length]);
+
+  async function doSteer() {
+    const msg = steerMsg.trim();
+    if (!msg) return;
+    setBusy("steer");
+    try { await postApi("/api/steer", { agent_id: agentKey, message: msg }); setSteerMsg(""); setShowSteer(false); }
+    catch (e) { console.error(e); }
+    finally { setBusy(null); }
+  }
+
+  async function doInterrupt() {
+    setBusy("interrupt");
+    try { await postApi("/api/interrupt", { agent_id: agentKey, reason: "Interrupted via dashboard" }); }
+    catch (e) { console.error(e); }
+    finally { setBusy(null); }
+  }
 
   return (
     <div style={{
@@ -147,7 +166,74 @@ function AgentTimelineCard({ name, role, items, active, color }: {
         }}>
           {active ? "streaming" : "idle"}
         </span>
+        {/* Steer + Interrupt buttons — only when active */}
+        {active && (
+          <>
+            <button
+              onClick={() => setShowSteer(!showSteer)}
+              title="Steer agent"
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 22, height: 22, borderRadius: 5, border: "none", padding: 0,
+                background: showSteer ? "var(--blue-bg)" : "transparent",
+                color: showSteer ? "var(--blue)" : "var(--text-muted)",
+                cursor: "pointer", transition: "all 0.1s",
+              }}
+            >
+              <Navigation size={11} />
+            </button>
+            <button
+              onClick={doInterrupt}
+              disabled={busy === "interrupt"}
+              title="Interrupt agent"
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 22, height: 22, borderRadius: 5, border: "none", padding: 0,
+                background: "transparent",
+                color: "var(--text-muted)",
+                cursor: "pointer", transition: "all 0.1s",
+                opacity: busy === "interrupt" ? 0.5 : 1,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--red)"; e.currentTarget.style.background = "var(--red-bg)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "transparent"; }}
+            >
+              <StopCircle size={11} />
+            </button>
+          </>
+        )}
       </div>
+      {/* Steer input bar */}
+      {showSteer && (
+        <div style={{
+          display: "flex", gap: 6, padding: "6px 10px",
+          borderBottom: "1px solid var(--border)", flexShrink: 0,
+        }}>
+          <input
+            value={steerMsg}
+            onChange={(e) => setSteerMsg(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && doSteer()}
+            placeholder="Steer message..."
+            autoFocus
+            style={{
+              flex: 1, fontSize: 11, padding: "5px 8px", borderRadius: 6,
+              border: "1px solid var(--border)", background: "var(--bg-tertiary)",
+              color: "var(--text-primary)", fontFamily: "inherit", outline: "none",
+            }}
+          />
+          <button
+            onClick={doSteer}
+            disabled={busy === "steer" || !steerMsg.trim()}
+            style={{
+              fontSize: 11, padding: "5px 10px", borderRadius: 6, border: "none",
+              background: "var(--accent)", color: "#fff", cursor: "pointer",
+              fontFamily: "inherit", fontWeight: 500,
+              opacity: busy === "steer" || !steerMsg.trim() ? 0.5 : 1,
+            }}
+          >
+            Send
+          </button>
+        </div>
+      )}
       <div ref={scrollRef} style={{
         flex: 1, overflowY: "auto", padding: "8px 10px 6px",
         background: "var(--bg-tertiary)",
@@ -206,6 +292,7 @@ function LiveMode({ activity, activeAgents, agents }: {
           items={byAgent.get(emp.agent_key) ?? []}
           active={activeAgents[emp.agent_key] ?? false}
           color={emp.color || "var(--text-muted)"}
+          agentKey={emp.agent_key}
         />
       ))}
     </div>

@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useCallback } from "react";
 import {
   Lock, X, Search, ChevronLeft,
-  UserPlus, Play, Pause, Power, Trash2,
+  UserPlus, Power, Trash2,
   LayoutGrid, Building2,
 } from "lucide-react";
 import { usePolling, postApi, deleteApi } from "../hooks/useApi";
@@ -504,10 +504,6 @@ export default function DirectoryView() {
 
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "department">("grid");
-  const [steerInputs, setSteerInputs] = useState<Record<string, string>>({});
-  const [interruptInputs, setInterruptInputs] = useState<Record<string, string>>({});
-  const [steerOpen, setSteerOpen] = useState<Record<string, boolean>>({});
-  const [interruptOpen, setInterruptOpen] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState<Record<string, string | null>>({});
   const [hireOpen, setHireOpen] = useState(false);
 
@@ -595,25 +591,6 @@ export default function DirectoryView() {
     }, 450);
   }, []);
 
-  /* ── Steer / Interrupt ── */
-
-  async function doSteer(key: string) {
-    const msg = (steerInputs[key] ?? "").trim();
-    if (!msg) return;
-    setBusy((p) => ({ ...p, [key]: "steer" }));
-    try { await postApi("/api/steer", { agent_id: key, message: msg }); setSteerInputs((p) => ({ ...p, [key]: "" })); setSteerOpen((p) => ({ ...p, [key]: false })); }
-    catch (e) { console.error(e); }
-    finally { setBusy((p) => ({ ...p, [key]: null })); }
-  }
-
-  async function doInterrupt(key: string) {
-    const reason = (interruptInputs[key] ?? "").trim() || "Interrupted via dashboard";
-    setBusy((p) => ({ ...p, [key]: "interrupt" }));
-    try { await postApi("/api/interrupt", { agent_id: key, reason }); setInterruptInputs((p) => ({ ...p, [key]: "" })); setInterruptOpen((p) => ({ ...p, [key]: false })); }
-    catch (e) { console.error(e); }
-    finally { setBusy((p) => ({ ...p, [key]: null })); }
-  }
-
   /* ── AR lifecycle actions ── */
 
   async function doToggle(agentId: string, enabled: boolean) {
@@ -622,15 +599,6 @@ export default function DirectoryView() {
       await postApi(`/api/agents/${agentId}/toggle`, { enabled });
       refreshRuntime();
       refreshEmployees();
-    } catch (e) { console.error(e); }
-    finally { setBusy((p) => ({ ...p, [agentId]: null })); }
-  }
-
-  async function doPauseResume(agentId: string, paused: boolean) {
-    setBusy((p) => ({ ...p, [agentId]: "pause" }));
-    try {
-      await postApi(`/api/agents/${agentId}/${paused ? "pause" : "resume"}`, {});
-      refreshRuntime();
     } catch (e) { console.error(e); }
     finally { setBusy((p) => ({ ...p, [agentId]: null })); }
   }
@@ -796,25 +764,6 @@ export default function DirectoryView() {
               <Power size={10} />
               {rt.enabled ? "On" : "Off"}
             </button>
-            {rt.enabled && (
-              <button
-                onClick={() => doPauseResume(key, rt.status !== "paused")}
-                disabled={busy[key] === "pause"}
-                title={rt.status === "paused" ? "Resume" : "Pause"}
-                style={{
-                  display: "flex", alignItems: "center", gap: 3,
-                  fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 5,
-                  border: "1px solid", cursor: "pointer", fontFamily: "inherit",
-                  borderColor: rt.status === "paused" ? "var(--yellow)" : "var(--border)",
-                  background: rt.status === "paused" ? "var(--yellow-bg, rgba(245,158,11,0.1))" : "var(--bg-tertiary)",
-                  color: rt.status === "paused" ? "var(--yellow)" : "var(--text-muted)",
-                  opacity: busy[key] === "pause" ? 0.5 : 1,
-                }}
-              >
-                {rt.status === "paused" ? <Play size={10} /> : <Pause size={10} />}
-                {rt.status === "paused" ? "Resume" : "Pause"}
-              </button>
-            )}
             <button
               onClick={() => doRemove(key)}
               disabled={busy[key] === "remove"}
@@ -1123,25 +1072,6 @@ export default function DirectoryView() {
                       <Power size={11} />
                       {expandedRuntime.enabled ? "On" : "Off"}
                     </button>
-                    {expandedRuntime.enabled && (
-                      <button
-                        onClick={() => doPauseResume(expandedAgent, expandedRuntime.status !== "paused")}
-                        disabled={busy[expandedAgent] === "pause"}
-                        title={expandedRuntime.status === "paused" ? "Resume" : "Pause"}
-                        style={{
-                          display: "flex", alignItems: "center", gap: 4,
-                          fontSize: 11, fontWeight: 600, padding: "5px 12px", borderRadius: 6,
-                          border: "1px solid", cursor: "pointer", fontFamily: "inherit",
-                          borderColor: expandedRuntime.status === "paused" ? "var(--yellow)" : "var(--border)",
-                          background: expandedRuntime.status === "paused" ? "var(--yellow-bg, rgba(245,158,11,0.1))" : "var(--bg-tertiary)",
-                          color: expandedRuntime.status === "paused" ? "var(--yellow)" : "var(--text-muted)",
-                          opacity: busy[expandedAgent] === "pause" ? 0.5 : 1,
-                        }}
-                      >
-                        {expandedRuntime.status === "paused" ? <Play size={11} /> : <Pause size={11} />}
-                        {expandedRuntime.status === "paused" ? "Resume" : "Pause"}
-                      </button>
-                    )}
                     <button
                       onClick={() => { doRemove(expandedAgent); closeSettings(); }}
                       disabled={busy[expandedAgent] === "remove"}
@@ -1208,86 +1138,6 @@ export default function DirectoryView() {
                   <ExpandedToolsGrid key={expandedAgent} profile={expandedProfile} />
                 )}
 
-                {/* Controls section */}
-                <div style={{ marginTop: 24 }}>
-                  <div style={{
-                    fontSize: 13, fontWeight: 600, color: "var(--text-primary)",
-                    marginBottom: 12,
-                  }}>
-                    Controls
-                  </div>
-                  <div style={{ display: "flex", gap: 8, maxWidth: 500 }}>
-                    <button
-                      onClick={() => setSteerOpen((p) => ({ ...p, [expandedAgent]: !p[expandedAgent] }))}
-                      style={{
-                        flex: 1, fontSize: 12, padding: "8px 14px", borderRadius: 8,
-                        border: "1px solid", fontFamily: "inherit", fontWeight: 500, cursor: "pointer",
-                        borderColor: steerOpen[expandedAgent] ? "var(--blue)" : "var(--border)",
-                        background: steerOpen[expandedAgent] ? "var(--blue-bg)" : "transparent",
-                        color: steerOpen[expandedAgent] ? "var(--blue)" : "var(--text-muted)",
-                        transition: "all 0.08s",
-                      }}
-                    >
-                      Steer
-                    </button>
-                    <button
-                      onClick={() => setInterruptOpen((p) => ({ ...p, [expandedAgent]: !p[expandedAgent] }))}
-                      style={{
-                        flex: 1, fontSize: 12, padding: "8px 14px", borderRadius: 8,
-                        border: "1px solid", fontFamily: "inherit", fontWeight: 500, cursor: "pointer",
-                        borderColor: interruptOpen[expandedAgent] ? "var(--red)" : "var(--border)",
-                        background: interruptOpen[expandedAgent] ? "var(--red-bg)" : "transparent",
-                        color: interruptOpen[expandedAgent] ? "var(--red)" : "var(--text-muted)",
-                        transition: "all 0.08s",
-                      }}
-                    >
-                      Interrupt
-                    </button>
-                  </div>
-
-                  {steerOpen[expandedAgent] && (
-                    <div style={{ display: "flex", gap: 8, marginTop: 8, maxWidth: 500 }}>
-                      <input
-                        value={steerInputs[expandedAgent] ?? ""}
-                        onChange={(e) => setSteerInputs((p) => ({ ...p, [expandedAgent]: e.target.value }))}
-                        onKeyDown={(e) => e.key === "Enter" && doSteer(expandedAgent)}
-                        placeholder="Message..."
-                        style={{ flex: 1, fontSize: 12, padding: "7px 12px", borderRadius: 8 }}
-                      />
-                      <button onClick={() => doSteer(expandedAgent)} disabled={busy[expandedAgent] === "steer"}
-                        style={{
-                          fontSize: 12, padding: "7px 16px", borderRadius: 8, border: "none",
-                          background: "var(--accent)", color: "#fff", cursor: "pointer",
-                          fontFamily: "inherit", fontWeight: 500,
-                          opacity: busy[expandedAgent] === "steer" ? 0.5 : 1,
-                        }}>
-                        {busy[expandedAgent] === "steer" ? "..." : "Send"}
-                      </button>
-                    </div>
-                  )}
-
-                  {interruptOpen[expandedAgent] && (
-                    <div style={{ display: "flex", gap: 8, marginTop: 8, maxWidth: 500 }}>
-                      <input
-                        value={interruptInputs[expandedAgent] ?? ""}
-                        onChange={(e) => setInterruptInputs((p) => ({ ...p, [expandedAgent]: e.target.value }))}
-                        onKeyDown={(e) => e.key === "Enter" && doInterrupt(expandedAgent)}
-                        placeholder="Reason..."
-                        style={{ flex: 1, fontSize: 12, padding: "7px 12px", borderRadius: 8, borderColor: "var(--red)" }}
-                      />
-                      <button onClick={() => doInterrupt(expandedAgent)} disabled={busy[expandedAgent] === "interrupt"}
-                        style={{
-                          fontSize: 12, padding: "7px 16px", borderRadius: 8,
-                          border: "1px solid var(--red)",
-                          background: "var(--red-bg)", color: "var(--red)",
-                          cursor: "pointer", fontFamily: "inherit", fontWeight: 500,
-                          opacity: busy[expandedAgent] === "interrupt" ? 0.5 : 1,
-                        }}>
-                        {busy[expandedAgent] === "interrupt" ? "..." : "Stop"}
-                      </button>
-                    </div>
-                  )}
-                </div>
               </div>
             </div>
           </div>
