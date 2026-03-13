@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Plus, Trash2, Save, RefreshCw, Server, ChevronDown, ChevronRight,
-  Shield, Search, MessageSquare, Cpu,
-  Zap, Settings2, Database, Eye,
+  Shield, Search, MessageSquare, Cpu, Box,
+  Zap, Settings2, Database, Eye, Star, Check,
 } from "lucide-react";
 import { postApi, apiUrl } from "../hooks/useApi";
 import { usePolling } from "../hooks/useApi";
@@ -21,6 +21,29 @@ interface MCPConfig {
 
 interface MCPStatus {
   servers: { name: string; tools: string[]; connected: boolean }[];
+}
+
+interface ModelSlot {
+  provider: string;
+  model: string;
+}
+
+interface ProviderInfo {
+  id: string;
+  name: string;
+  configured: boolean;
+  envKey: string;
+  models: string[];
+}
+
+interface ModelConfigData {
+  providers: ProviderInfo[];
+  config: {
+    primary: ModelSlot;
+    secondary: ModelSlot | null;
+    fallback: ModelSlot | null;
+    agentModels: Record<string, ModelSlot>;
+  };
 }
 
 interface SystemSettings {
@@ -178,11 +201,152 @@ function ConfigRow({ label, value }: { label: string; value: string | number | b
   );
 }
 
+// ── Model tier row (editable provider+model selector) ───────────────────────
+
+function ModelTierRow({ tier, slot, color, icon, providers, onSave, saving }: {
+  tier: string;
+  slot: ModelSlot | null;
+  color: string;
+  icon: React.ReactNode;
+  providers: ProviderInfo[];
+  onSave: (slot: ModelSlot | null) => void;
+  saving: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [selProvider, setSelProvider] = useState(slot?.provider ?? providers[0]?.id ?? "");
+  const [selModel, setSelModel] = useState(slot?.model ?? "");
+
+  const currentProvider = providers.find((p) => p.id === selProvider);
+  const models = currentProvider?.models ?? [];
+
+  function handleSave() {
+    if (selProvider && selModel) {
+      onSave({ provider: selProvider, model: selModel });
+    } else {
+      onSave(null);
+    }
+    setEditing(false);
+  }
+
+  function handleClear() {
+    onSave(null);
+    setSelProvider(providers[0]?.id ?? "");
+    setSelModel("");
+    setEditing(false);
+  }
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 10,
+      padding: "10px 14px", borderRadius: 10,
+      background: "var(--bg-card)", border: "1px solid var(--border)",
+    }}>
+      <div style={{
+        width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+        background: slot ? `color-mix(in srgb, ${color} 15%, transparent)` : "var(--bg-tertiary)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        color: slot ? color : "var(--text-muted)",
+      }}>
+        {icon}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 12, fontWeight: 600, color: "var(--text-primary)",
+          textTransform: "capitalize",
+        }}>
+          {tier}
+        </div>
+        {!editing && (
+          <div style={{
+            fontSize: 11, color: slot ? "var(--text-secondary)" : "var(--text-muted)",
+            fontFamily: "monospace", marginTop: 1,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {slot ? `${slot.provider} / ${slot.model}` : "Not configured"}
+          </div>
+        )}
+      </div>
+
+      {editing ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+          <select
+            value={selProvider}
+            onChange={(e) => { setSelProvider(e.target.value); setSelModel(""); }}
+            style={{
+              fontSize: 11, padding: "5px 8px", borderRadius: 6,
+              border: "1px solid var(--border)", background: "var(--bg-tertiary)",
+              color: "var(--text-primary)", fontFamily: "inherit", outline: "none",
+            }}
+          >
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+          <select
+            value={selModel}
+            onChange={(e) => setSelModel(e.target.value)}
+            style={{
+              fontSize: 11, padding: "5px 8px", borderRadius: 6,
+              border: "1px solid var(--border)", background: "var(--bg-tertiary)",
+              color: "var(--text-primary)", fontFamily: "monospace", outline: "none",
+              maxWidth: 220,
+            }}
+          >
+            <option value="">Select model...</option>
+            {models.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+          <button onClick={handleSave} disabled={saving || !selModel} style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            width: 26, height: 26, borderRadius: 6, border: "none",
+            background: selModel ? "var(--accent)" : "var(--bg-tertiary)",
+            color: selModel ? "#fff" : "var(--text-muted)",
+            cursor: selModel ? "pointer" : "default", padding: 0,
+          }}>
+            <Check size={12} />
+          </button>
+          {slot && (
+            <button onClick={handleClear} title="Clear" style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 26, height: 26, borderRadius: 6, border: "1px solid var(--border)",
+              background: "transparent", color: "var(--text-muted)",
+              cursor: "pointer", padding: 0,
+            }}>
+              <Trash2 size={11} />
+            </button>
+          )}
+        </div>
+      ) : (
+        <button
+          onClick={() => {
+            setSelProvider(slot?.provider ?? providers[0]?.id ?? "");
+            setSelModel(slot?.model ?? "");
+            setEditing(true);
+          }}
+          style={{
+            fontSize: 11, fontWeight: 500, padding: "4px 12px", borderRadius: 6,
+            border: "1px solid var(--border)", background: "var(--bg-tertiary)",
+            color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit",
+            flexShrink: 0,
+          }}
+        >
+          {slot ? "Change" : "Set"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── Main Component ──────────────────────────────────────────────────────────
 
 export default function SettingsView() {
   // System settings (read-only)
   const { data: settings } = usePolling<SystemSettings>("/api/settings", 10000);
+
+  // Model config
+  const { data: modelData, refresh: refreshModels } = usePolling<ModelConfigData>("/api/model-config", 10000);
+  const [modelSaving, setModelSaving] = useState(false);
 
   // MCP config (editable)
   const [mcpConfig, setMcpConfig] = useState<MCPConfig>({ mcpServers: {} });
@@ -217,6 +381,17 @@ export default function SettingsView() {
   function showToast(msg: string) {
     setToast(msg);
     setTimeout(() => setToast(null), 3000);
+  }
+
+  // Model tier save
+  async function saveModelTier(tier: "primary" | "secondary" | "fallback", slot: ModelSlot | null) {
+    setModelSaving(true);
+    try {
+      await postApi("/api/model-config", { [tier]: slot });
+      refreshModels();
+      showToast(`${tier.charAt(0).toUpperCase() + tier.slice(1)} model updated`);
+    } catch { showToast("Failed to save model config"); }
+    finally { setModelSaving(false); }
   }
 
   // MCP mutations
@@ -356,16 +531,141 @@ export default function SettingsView() {
           </div>
         </Section>
 
+        {/* ═══ Models ═══ */}
+        <Section title="Models" icon={<Box size={15} style={{ color: "var(--purple)" }} />}>
+          {modelData ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {/* Provider list */}
+              <div>
+                <div style={{
+                  fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
+                  textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8,
+                }}>
+                  Providers
+                </div>
+                <div style={{
+                  display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+                  gap: 8,
+                }}>
+                  {modelData.providers.map((p) => (
+                    <div key={p.id} style={{
+                      display: "flex", alignItems: "center", gap: 10,
+                      padding: "10px 12px", borderRadius: 8,
+                      background: "var(--bg-card)", border: "1px solid var(--border)",
+                    }}>
+                      <div style={{
+                        width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                        background: p.configured ? "var(--green)" : "var(--text-muted)",
+                        opacity: p.configured ? 1 : 0.4,
+                      }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
+                          {p.name}
+                        </div>
+                        <div style={{
+                          fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace",
+                        }}>
+                          {p.models.length} models · {p.envKey}
+                        </div>
+                      </div>
+                      <span style={{
+                        fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4,
+                        background: p.configured
+                          ? "color-mix(in srgb, var(--green) 12%, transparent)"
+                          : "var(--bg-tertiary)",
+                        color: p.configured ? "var(--green)" : "var(--text-muted)",
+                      }}>
+                        {p.configured ? "READY" : "NO KEY"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Priority tiers */}
+              <div>
+                <div style={{
+                  fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
+                  textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8,
+                }}>
+                  Model Priority
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {(["primary", "secondary", "fallback"] as const).map((tier) => {
+                    const slot = modelData.config[tier];
+                    const tierColors = {
+                      primary: "var(--accent)",
+                      secondary: "var(--yellow)",
+                      fallback: "var(--text-muted)",
+                    };
+                    const tierIcons = {
+                      primary: <Star size={12} />,
+                      secondary: <Cpu size={12} />,
+                      fallback: <Shield size={12} />,
+                    };
+                    const configuredProviders = modelData.providers.filter((p) => p.configured);
+
+                    return (
+                      <ModelTierRow
+                        key={tier}
+                        tier={tier}
+                        slot={slot}
+                        color={tierColors[tier]}
+                        icon={tierIcons[tier]}
+                        providers={configuredProviders}
+                        onSave={(s) => saveModelTier(tier, s)}
+                        saving={modelSaving}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Per-agent overrides summary */}
+              {Object.keys(modelData.config.agentModels).length > 0 && (
+                <div>
+                  <div style={{
+                    fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
+                    textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8,
+                  }}>
+                    Agent Overrides
+                  </div>
+                  <div style={{
+                    display: "flex", flexWrap: "wrap", gap: 6,
+                  }}>
+                    {Object.entries(modelData.config.agentModels).map(([agentId, s]) => (
+                      <span key={agentId} style={{
+                        fontSize: 11, padding: "4px 10px", borderRadius: 6,
+                        background: "var(--bg-card)", border: "1px solid var(--border)",
+                        color: "var(--text-secondary)", fontFamily: "monospace",
+                      }}>
+                        @{agentId} → {s.provider}/{s.model.split("/").pop()}
+                      </span>
+                    ))}
+                  </div>
+                  <div style={{
+                    fontSize: 11, color: "var(--text-muted)", marginTop: 6, paddingLeft: 2,
+                  }}>
+                    Per-agent models can be configured from the Directory view.
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ padding: 16, color: "var(--text-muted)", fontSize: 12, textAlign: "center" }}>Loading...</div>
+          )}
+        </Section>
+
         {/* ═══ LLM Configuration ═══ */}
-        <Section title="LLM Configuration" icon={<Cpu size={15} style={{ color: "var(--purple)" }} />}>
+        <Section title="LLM Defaults" icon={<Cpu size={15} style={{ color: "var(--purple)" }} />}>
           <div style={{
             background: "var(--bg-card)", border: "1px solid var(--border)",
             borderRadius: 10, padding: "4px 14px",
           }}>
             {s ? (
               <>
-                <ConfigRow label="Provider" value={s.llm.provider} />
-                <ConfigRow label="Model" value={s.llm.model} />
+                <ConfigRow label="Provider (env)" value={s.llm.provider} />
+                <ConfigRow label="Model (env)" value={s.llm.model} />
                 <ConfigRow label="Thinking Level" value={s.llm.thinkingLevel} />
                 <ConfigRow label="Temperature" value={s.llm.temperature} />
                 <ConfigRow label="Max Tokens" value={s.llm.maxTokens.toLocaleString()} />
@@ -377,7 +677,7 @@ export default function SettingsView() {
           <div style={{
             fontSize: 11, color: "var(--text-muted)", marginTop: 8, paddingLeft: 2,
           }}>
-            Configure via environment variables (VEC_MODEL_PROVIDER, VEC_MODEL, VEC_THINKING_LEVEL)
+            Environment defaults — overridden by Models priority above when set.
           </div>
         </Section>
 

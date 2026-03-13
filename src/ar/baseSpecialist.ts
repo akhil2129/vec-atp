@@ -14,6 +14,7 @@ import { EventLog } from "../atp/eventLog.js";
 import { EventType } from "../atp/models.js";
 import type { VECAgent } from "../atp/inboxLoop.js";
 import { config } from "../config.js";
+import { getEffectiveModel } from "../atp/modelConfig.js";
 import { founder } from "../identity.js";
 import { loadAgentMemory } from "../memory/agentMemory.js";
 import { makeCompactionTransform } from "../memory/compaction.js";
@@ -82,10 +83,11 @@ export class BaseSpecialistAgent implements VECAgent {
       company_name: config.companyName,
     });
 
+    const effectiveModel = getEffectiveModel(entry.agent_id);
     this.agent = new Agent({
       initialState: {
         systemPrompt,
-        model: getModel(config.modelProvider as any, config.model as any),
+        model: getModel(effectiveModel.provider as any, effectiveModel.model as any),
         thinkingLevel: config.thinkingLevel,
         tools: this._filteredTools(),
         messages: [],

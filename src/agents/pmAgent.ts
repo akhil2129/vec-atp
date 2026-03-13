@@ -15,6 +15,7 @@ import { EventLog } from "../atp/eventLog.js";
 import { EventType } from "../atp/models.js";
 import type { VECAgent } from "../atp/inboxLoop.js";
 import { config } from "../config.js";
+import { getEffectiveModel } from "../atp/modelConfig.js";
 import { getPMTaskTools } from "../tools/pm/taskTools.js";
 import { getPMEmployeeTools } from "../tools/pm/employeeTools.js";
 import { getMemoryToolsSlim } from "../tools/shared/memoryTools.js";
@@ -90,10 +91,11 @@ export class PMAgent implements VECAgent {
       ...getMCPTools(),
     ];
 
+    const effectiveModel = getEffectiveModel("pm");
     this.agent = new Agent({
       initialState: {
         systemPrompt: PM_SYSTEM_PROMPT,
-        model: getModel(config.modelProvider as any, config.model as any),
+        model: getModel(effectiveModel.provider as any, effectiveModel.model as any),
         thinkingLevel: config.thinkingLevel,
         tools: this._filteredTools(),
         messages: [],

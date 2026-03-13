@@ -42,6 +42,7 @@ import { getMCPTools } from "../mcp/mcpBridge.js";
 import { ActiveChannelState } from "../channels/activeChannel.js";
 import type { VECAgent } from "../atp/inboxLoop.js";
 import { getAllUsage as getFinanceAllUsage, getTotals as getFinanceTotals, resetUsage as resetFinanceUsage } from "../atp/tokenTracker.js";
+import { getProviders, getModelConfig, setModelConfig, setAgentModel, getEffectiveModel } from "../atp/modelConfig.js";
 import {
   apiKeyAuth,
   getDashboardApiKey,
@@ -2828,6 +2829,42 @@ export function startDashboardServer(runtime: AgentRuntime, port = config.dashbo
         trivy: { configured: true },
       },
     });
+  });
+
+  // ── Model Config: per-agent model overrides + provider priority ────────
+  app.get("/api/model-config", (_req, res) => {
+    res.json({
+      providers: getProviders(),
+      config: getModelConfig(),
+    });
+  });
+
+  app.post("/api/model-config", (req, res) => {
+    const body = req.body;
+    if (!body || typeof body !== "object") {
+      res.status(400).json({ error: "Invalid body" });
+      return;
+    }
+    try {
+      setModelConfig(body);
+      res.json({ ok: true, config: getModelConfig() });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message ?? "Failed to save model config" });
+    }
+  });
+
+  app.post("/api/agent-model", (req, res) => {
+    const { agent_id, provider, model } = req.body ?? {};
+    if (!agent_id || typeof agent_id !== "string") {
+      res.status(400).json({ error: "agent_id is required" });
+      return;
+    }
+    if (provider && model) {
+      setAgentModel(agent_id, { provider, model });
+    } else {
+      setAgentModel(agent_id, null); // clear override
+    }
+    res.json({ ok: true, effective: getEffectiveModel(agent_id) });
   });
 
   // ── Finance: token usage & cost tracking ────────────────────────────────

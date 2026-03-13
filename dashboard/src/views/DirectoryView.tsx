@@ -1,8 +1,8 @@
-import { useState, useMemo, useRef, useCallback } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import {
   Lock, X, Search, ChevronLeft,
   UserPlus, Power, Trash2,
-  LayoutGrid, Building2,
+  LayoutGrid, Building2, Cpu, Check,
 } from "lucide-react";
 import { usePolling, postApi, deleteApi } from "../hooks/useApi";
 import { useAgentStream } from "../hooks/useSSE";
@@ -11,6 +11,13 @@ import type {
   Task, AgentProfile,
   AgentRuntimeEntry, RoleTemplateSummary,
 } from "../types";
+
+interface ModelSlot { provider: string; model: string; }
+interface ProviderInfo { id: string; name: string; configured: boolean; models: string[]; }
+interface ModelConfigData {
+  providers: ProviderInfo[];
+  config: { primary: ModelSlot; secondary: ModelSlot | null; fallback: ModelSlot | null; agentModels: Record<string, ModelSlot>; };
+}
 
 const ROLE_COLORS: Record<string, string> = {
   "Project Manager": "var(--purple)", "Senior Developer": "var(--blue)",
@@ -374,6 +381,193 @@ function HireModal({
         </div>
       </div>
     </>
+  );
+}
+
+/* ── Agent model selector ── */
+
+function AgentModelSelector({ agentId }: { agentId: string }) {
+  const { data: modelData } = usePolling<ModelConfigData>("/api/model-config", 10000);
+  const [saving, setSaving] = useState(false);
+  const [selProvider, setSelProvider] = useState("");
+  const [selModel, setSelModel] = useState("");
+  const [editing, setEditing] = useState(false);
+
+  const providers = (modelData?.providers ?? []).filter((p) => p.configured);
+  const override = modelData?.config.agentModels[agentId] ?? null;
+  const primary = modelData?.config.primary;
+  const effective = override ?? primary;
+
+  // Sync selectors when override changes
+  useEffect(() => {
+    if (override) {
+      setSelProvider(override.provider);
+      setSelModel(override.model);
+    } else if (primary) {
+      setSelProvider(primary.provider);
+      setSelModel(primary.model);
+    }
+  }, [override?.provider, override?.model, primary?.provider, primary?.model]);
+
+  const currentProvider = providers.find((p) => p.id === selProvider);
+  const models = currentProvider?.models ?? [];
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await postApi("/api/agent-model", { agent_id: agentId, provider: selProvider, model: selModel });
+    } catch (e) { console.error(e); }
+    finally { setSaving(false); setEditing(false); }
+  }
+
+  async function handleClear() {
+    setSaving(true);
+    try {
+      await postApi("/api/agent-model", { agent_id: agentId });
+    } catch (e) { console.error(e); }
+    finally { setSaving(false); setEditing(false); }
+  }
+
+  if (!modelData) return null;
+
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        marginBottom: 10,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Cpu size={13} style={{ color: "var(--purple)" }} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Model</span>
+          {override && (
+            <span style={{
+              fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4,
+              background: "color-mix(in srgb, var(--purple) 12%, transparent)",
+              color: "var(--purple)",
+            }}>
+              OVERRIDE
+            </span>
+          )}
+        </div>
+        {!editing && (
+          <button
+            onClick={() => setEditing(true)}
+            style={{
+              fontSize: 11, fontWeight: 500, padding: "4px 12px", borderRadius: 6,
+              border: "1px solid var(--border)", background: "var(--bg-tertiary)",
+              color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit",
+            }}
+          >
+            Change
+          </button>
+        )}
+      </div>
+
+      {editing ? (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "10px 12px", borderRadius: 8,
+          background: "var(--bg-tertiary)", border: "1px solid var(--border)",
+        }}>
+          <select
+            value={selProvider}
+            onChange={(e) => { setSelProvider(e.target.value); setSelModel(""); }}
+            style={{
+              fontSize: 12, padding: "6px 10px", borderRadius: 6,
+              border: "1px solid var(--border)", background: "var(--bg-card)",
+              color: "var(--text-primary)", fontFamily: "inherit", outline: "none",
+            }}
+          >
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+          <select
+            value={selModel}
+            onChange={(e) => setSelModel(e.target.value)}
+            style={{
+              fontSize: 12, padding: "6px 10px", borderRadius: 6, flex: 1,
+              border: "1px solid var(--border)", background: "var(--bg-card)",
+              color: "var(--text-primary)", fontFamily: "monospace", outline: "none",
+            }}
+          >
+            <option value="">Select model...</option>
+            {models.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleSave}
+            disabled={saving || !selModel}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 28, height: 28, borderRadius: 6, border: "none", flexShrink: 0,
+              background: selModel ? "var(--accent)" : "var(--bg-tertiary)",
+              color: selModel ? "#fff" : "var(--text-muted)",
+              cursor: selModel ? "pointer" : "default", padding: 0,
+            }}
+          >
+            <Check size={13} />
+          </button>
+          {override && (
+            <button
+              onClick={handleClear}
+              disabled={saving}
+              title="Reset to primary"
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+                border: "1px solid var(--border)", background: "transparent",
+                color: "var(--text-muted)", cursor: "pointer", padding: 0,
+              }}
+            >
+              <X size={12} />
+            </button>
+          )}
+          <button
+            onClick={() => setEditing(false)}
+            style={{
+              fontSize: 11, padding: "5px 10px", borderRadius: 6,
+              border: "1px solid var(--border)", background: "transparent",
+              color: "var(--text-muted)", cursor: "pointer", fontFamily: "inherit",
+              flexShrink: 0,
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10,
+          padding: "10px 12px", borderRadius: 8,
+          background: "var(--bg-tertiary)", border: "1px solid var(--border)",
+        }}>
+          <div style={{
+            width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+            background: "var(--green)",
+          }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text-primary)" }}>
+              {effective?.provider ?? "—"}
+            </div>
+            <div style={{
+              fontSize: 11, color: "var(--text-muted)", fontFamily: "monospace",
+            }}>
+              {effective?.model ?? "Not configured"}
+            </div>
+          </div>
+          {!override && (
+            <span style={{
+              fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4,
+              background: "var(--bg-card)", color: "var(--text-muted)",
+              border: "1px solid var(--border)",
+            }}>
+              PRIMARY
+            </span>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1132,6 +1326,9 @@ export default function DirectoryView() {
 
               {/* ── Panel body (scrollable) ── */}
               <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px 28px" }}>
+
+                {/* Model selector */}
+                <AgentModelSelector agentId={expandedAgent} />
 
                 {/* Tools grid */}
                 {expandedProfile && (
