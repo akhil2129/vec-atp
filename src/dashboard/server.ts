@@ -2883,6 +2883,10 @@ export function startDashboardServer(runtime: AgentRuntime, port = config.dashbo
           hostUrl: config.sonarHostUrl,
           projectKey: config.sonarProjectBaseKey,
         },
+        slack: {
+          configured: !!(process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN),
+          channelId: process.env.SLACK_CHANNEL_ID ?? "",
+        },
         gitleaks: { configured: true },
         semgrep: { configured: true },
         trivy: { configured: true },

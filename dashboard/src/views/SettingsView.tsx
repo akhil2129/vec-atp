@@ -3,6 +3,7 @@ import {
   Plus, Trash2, Save, RefreshCw, Server, ChevronDown, ChevronRight,
   Shield, Search, MessageSquare, Cpu, Box, ExternalLink,
   Zap, Settings2, Database, Eye, Star, Check, X, Package,
+  Hash, Globe, Radio,
 } from "lucide-react";
 import { postApi, apiUrl } from "../hooks/useApi";
 import { usePolling } from "../hooks/useApi";
@@ -72,6 +73,7 @@ interface SystemSettings {
   };
   integrations: {
     telegram: { configured: boolean; chatId: string };
+    slack?: { configured: boolean; channelId: string };
     searxng: { configured: boolean; url: string };
     sonarqube: { configured: boolean; hostUrl: string; projectKey: string };
     gitleaks: { configured: boolean };
@@ -84,35 +86,92 @@ interface SystemSettings {
 
 function deepClone<T>(obj: T): T { return JSON.parse(JSON.stringify(obj)); }
 
-// ── Section wrapper ─────────────────────────────────────────────────────────
+// ── Settings section type ────────────────────────────────────────────────────
 
-function Section({ title, icon, children, defaultOpen = true }: {
-  title: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
+type SettingsSection = "general" | "models" | "channels" | "integrations" | "mcp";
+
+const SECTION_NAV: { key: SettingsSection; label: string; icon: React.ReactNode; color: string }[] = [
+  { key: "general", label: "General", icon: <Settings2 size={15} />, color: "var(--text-secondary)" },
+  { key: "models", label: "Models", icon: <Box size={15} />, color: "var(--purple)" },
+  { key: "channels", label: "Channels", icon: <Radio size={15} />, color: "var(--blue)" },
+  { key: "integrations", label: "Integrations", icon: <Zap size={15} />, color: "var(--orange)" },
+  { key: "mcp", label: "MCP Servers", icon: <Server size={15} />, color: "var(--green)" },
+];
+
+// ── Logo icon helper ─────────────────────────────────────────────────────────
+
+function LogoIcon({ src, fallback, size = 20 }: { src: string; fallback: React.ReactNode; size?: number }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <>{fallback}</>;
   return (
-    <div style={{ marginBottom: 20 }}>
-      <button
-        onClick={() => setOpen(!open)}
-        style={{
-          display: "flex", alignItems: "center", gap: 8, width: "100%",
-          padding: "10px 0", border: "none", background: "transparent",
-          cursor: "pointer", fontFamily: "inherit",
-        }}
-      >
-        {icon}
-        <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", flex: 1, textAlign: "left" }}>
-          {title}
+    <img
+      src={src}
+      alt=""
+      style={{ width: size, height: size, borderRadius: 3, filter: "var(--icon-filter, none)" }}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+// ── Channel card ─────────────────────────────────────────────────────────────
+
+function ChannelCard({ name, logoUrl, fallbackIcon, configured, detail, color, envHint }: {
+  name: string;
+  logoUrl: string;
+  fallbackIcon: React.ReactNode;
+  configured: boolean;
+  detail?: string;
+  color: string;
+  envHint: string;
+}) {
+  return (
+    <div style={{
+      padding: "16px 18px", borderRadius: 10,
+      background: "var(--bg-card)", border: "1px solid var(--border)",
+      transition: "border-color 0.12s",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 12 }}>
+        <div style={{
+          width: 42, height: 42, borderRadius: 10,
+          background: configured ? `color-mix(in srgb, ${color} 10%, transparent)` : "var(--bg-tertiary)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          color: configured ? color : "var(--text-muted)",
+          flexShrink: 0,
+        }}>
+          <LogoIcon src={logoUrl} fallback={fallbackIcon} size={22} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
+            {name}
+          </div>
+          <div style={{
+            fontSize: 10, color: "var(--text-muted)", marginTop: 2,
+            fontFamily: "monospace", letterSpacing: "0.02em",
+          }}>
+            {envHint}
+          </div>
+        </div>
+        <span style={{
+          fontSize: 10, fontWeight: 600, padding: "4px 10px", borderRadius: 6,
+          background: configured
+            ? "color-mix(in srgb, var(--green) 10%, transparent)"
+            : "var(--bg-tertiary)",
+          color: configured ? "var(--green)" : "var(--text-muted)",
+          border: `1px solid ${configured ? "color-mix(in srgb, var(--green) 18%, transparent)" : "var(--border)"}`,
+          flexShrink: 0, letterSpacing: "0.04em",
+        }}>
+          {configured ? "CONNECTED" : "NOT SET"}
         </span>
-        {open ? <ChevronDown size={14} style={{ color: "var(--text-muted)" }} />
-          : <ChevronRight size={14} style={{ color: "var(--text-muted)" }} />}
-      </button>
-      {open && (
-        <div style={{ paddingTop: 4 }}>
-          {children}
+      </div>
+      {detail && (
+        <div style={{
+          fontSize: 12, color: "var(--text-secondary)",
+          padding: "8px 12px", borderRadius: 7,
+          background: "var(--bg-tertiary)",
+          fontFamily: "monospace",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }}>
+          {detail}
         </div>
       )}
     </div>
@@ -121,72 +180,85 @@ function Section({ title, icon, children, defaultOpen = true }: {
 
 // ── Integration card ────────────────────────────────────────────────────────
 
-function IntegrationCard({ name, icon, configured, detail, color }: {
+function IntegrationCard({ name, logoUrl, fallbackIcon, configured, detail, color, subtitle }: {
   name: string;
-  icon: React.ReactNode;
+  logoUrl: string;
+  fallbackIcon: React.ReactNode;
   configured: boolean;
   detail?: string;
   color: string;
+  subtitle?: string;
 }) {
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: 12,
-      padding: "12px 14px", borderRadius: 10,
+      padding: "14px 16px", borderRadius: 10,
       background: "var(--bg-card)", border: "1px solid var(--border)",
+      transition: "border-color 0.12s",
     }}>
       <div style={{
-        width: 36, height: 36, borderRadius: 9,
-        background: configured ? `color-mix(in srgb, ${color} 15%, transparent)` : "var(--bg-tertiary)",
+        width: 38, height: 38, borderRadius: 9,
+        background: configured ? `color-mix(in srgb, ${color} 10%, transparent)` : "var(--bg-tertiary)",
         display: "flex", alignItems: "center", justifyContent: "center",
         color: configured ? color : "var(--text-muted)",
         flexShrink: 0,
       }}>
-        {icon}
+        <LogoIcon src={logoUrl} fallback={fallbackIcon} size={20} />
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }}>
-          {name}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
+            {name}
+          </span>
+          {subtitle && (
+            <span style={{
+              fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4,
+              background: `color-mix(in srgb, ${color} 10%, transparent)`,
+              color, letterSpacing: "0.04em",
+            }}>
+              {subtitle}
+            </span>
+          )}
         </div>
         {detail && (
           <div style={{
-            fontSize: 11, color: "var(--text-muted)", marginTop: 1,
+            fontSize: 11, color: "var(--text-muted)", marginTop: 2,
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
           }}>
             {detail}
           </div>
         )}
       </div>
-      <span style={{
-        fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 5,
-        background: configured
-          ? "color-mix(in srgb, var(--green) 12%, transparent)"
-          : "var(--bg-tertiary)",
-        color: configured ? "var(--green)" : "var(--text-muted)",
-        border: `1px solid ${configured ? "color-mix(in srgb, var(--green) 20%, transparent)" : "var(--border)"}`,
-        flexShrink: 0,
-      }}>
-        {configured ? "ACTIVE" : "NOT SET"}
-      </span>
+      <div style={{
+        width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+        background: configured ? "var(--green)" : "var(--text-muted)",
+        opacity: configured ? 1 : 0.4,
+      }} />
     </div>
   );
 }
 
 // ── Config row (read-only) ──────────────────────────────────────────────────
 
-function ConfigRow({ label, value }: { label: string; value: string | number | boolean }) {
+function ConfigRow({ label, value, icon }: { label: string; value: string | number | boolean; icon?: React.ReactNode }) {
   const display = typeof value === "boolean" ? (value ? "Enabled" : "Disabled") : String(value);
   const isBool = typeof value === "boolean";
   return (
     <div style={{
-      display: "flex", alignItems: "center", justifyContent: "space-between",
-      padding: "8px 0",
+      display: "flex", alignItems: "center", gap: 10,
+      padding: "10px 0",
       borderBottom: "1px solid var(--border)",
     }}>
-      <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{label}</span>
+      {icon && (
+        <span style={{ color: "var(--text-muted)", flexShrink: 0, display: "flex" }}>
+          {icon}
+        </span>
+      )}
+      <span style={{ fontSize: 13, color: "var(--text-secondary)", flex: 1 }}>{label}</span>
       {isBool ? (
         <span style={{
-          fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 4,
-          background: value ? "color-mix(in srgb, var(--green) 12%, transparent)" : "var(--bg-tertiary)",
+          fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 5,
+          background: value ? "var(--green-bg)" : "var(--bg-tertiary)",
           color: value ? "var(--green)" : "var(--text-muted)",
         }}>
           {display}
@@ -194,7 +266,7 @@ function ConfigRow({ label, value }: { label: string; value: string | number | b
       ) : (
         <span style={{
           fontSize: 12, color: "var(--text-primary)", fontFamily: "monospace",
-          background: "var(--bg-tertiary)", padding: "2px 8px", borderRadius: 4,
+          background: "var(--bg-tertiary)", padding: "3px 10px", borderRadius: 5,
         }}>
           {display}
         </span>
@@ -203,7 +275,7 @@ function ConfigRow({ label, value }: { label: string; value: string | number | b
   );
 }
 
-// ── Model tier row — custom Dropdown, configured providers only ──────────────
+// ── Model tier row ──────────────────────────────────────────────────────────
 
 function ModelTierRow({ tier, slot, color, icon, providers, onSave, saving }: {
   tier: string;
@@ -259,37 +331,35 @@ function ModelTierRow({ tier, slot, color, icon, providers, onSave, saving }: {
 
   return (
     <div style={{
-      padding: "12px 14px", borderRadius: 10,
+      padding: "14px 16px", borderRadius: 10,
       background: "var(--bg-card)", border: "1px solid var(--border)",
     }}>
-      {/* Label row */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
         <div style={{
-          width: 26, height: 26, borderRadius: 7, flexShrink: 0,
-          background: slot ? `color-mix(in srgb, ${color} 15%, transparent)` : "var(--bg-tertiary)",
+          width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+          background: slot ? `color-mix(in srgb, ${color} 12%, transparent)` : "var(--bg-tertiary)",
           display: "flex", alignItems: "center", justifyContent: "center",
           color: slot ? color : "var(--text-muted)",
         }}>
           {icon}
         </div>
         <span style={{
-          fontSize: 13, fontWeight: 600, color: "var(--text-primary)",
+          fontSize: 14, fontWeight: 600, color: "var(--text-primary)",
           textTransform: "capitalize", flex: 1,
         }}>
           {tier}
         </span>
         {slot && (
           <span style={{
-            fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4,
-            background: `color-mix(in srgb, ${color} 12%, transparent)`,
-            color,
+            fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 5,
+            background: `color-mix(in srgb, ${color} 10%, transparent)`,
+            color, letterSpacing: "0.04em",
           }}>
             SET
           </span>
         )}
       </div>
 
-      {/* Dropdowns row */}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <Dropdown
           value={selProvider}
@@ -310,10 +380,10 @@ function ModelTierRow({ tier, slot, color, icon, providers, onSave, saving }: {
         {dirty && selModel && (
           <button onClick={handleApply} disabled={saving} style={{
             display: "flex", alignItems: "center", justifyContent: "center",
-            height: 32, padding: "0 14px", borderRadius: 6, border: "none",
+            height: 32, padding: "0 14px", borderRadius: 7, border: "none",
             background: "var(--accent)", color: "#fff", fontSize: 11, fontWeight: 600,
             cursor: "pointer", fontFamily: "inherit", flexShrink: 0,
-            opacity: saving ? 0.5 : 1,
+            opacity: saving ? 0.5 : 1, transition: "opacity 0.12s",
           }}>
             <Check size={12} style={{ marginRight: 4 }} /> Apply
           </button>
@@ -321,9 +391,10 @@ function ModelTierRow({ tier, slot, color, icon, providers, onSave, saving }: {
         {slot && !dirty && (
           <button onClick={handleClear} disabled={saving} title="Clear this tier" style={{
             display: "flex", alignItems: "center", justifyContent: "center",
-            width: 32, height: 32, borderRadius: 6, flexShrink: 0,
+            width: 32, height: 32, borderRadius: 7, flexShrink: 0,
             border: "1px solid var(--border)", background: "transparent",
             color: "var(--text-muted)", cursor: "pointer", padding: 0,
+            transition: "color 0.12s, border-color 0.12s",
           }}>
             <Trash2 size={12} />
           </button>
@@ -333,9 +404,35 @@ function ModelTierRow({ tier, slot, color, icon, providers, onSave, saving }: {
   );
 }
 
+// ── Section label (uppercase) ───────────────────────────────────────────────
+
+function SectionLabel({ title, count }: { title: string; count?: number }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 8,
+      fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
+      textTransform: "uppercase", letterSpacing: "0.04em",
+      marginBottom: 10,
+    }}>
+      {title}
+      {count !== undefined && (
+        <span style={{
+          fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 4,
+          background: "var(--bg-tertiary)", color: "var(--text-muted)",
+          fontVariantNumeric: "tabular-nums",
+        }}>
+          {count}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ── Main Component ──────────────────────────────────────────────────────────
 
 export default function SettingsView() {
+  const [activeSection, setActiveSection] = useState<SettingsSection>("general");
+
   // System settings (read-only)
   const { data: settings } = usePolling<SystemSettings>("/api/settings", 10000);
 
@@ -367,8 +464,6 @@ export default function SettingsView() {
       setExpanded(exp);
     } catch {
       showToast("Failed to load MCP config");
-    } finally {
-      /* loaded */
     }
   }, []);
 
@@ -379,7 +474,6 @@ export default function SettingsView() {
     setTimeout(() => setToast(null), 3000);
   }
 
-  // Model tier save
   async function saveModelTier(tier: "primary" | "secondary" | "fallback", slot: ModelSlot | null) {
     setModelSaving(true);
     try {
@@ -390,7 +484,6 @@ export default function SettingsView() {
     finally { setModelSaving(false); }
   }
 
-  // Provider API key save
   async function saveProviderKey(providerId: string) {
     setKeySaving(true);
     try {
@@ -403,7 +496,6 @@ export default function SettingsView() {
     finally { setKeySaving(false); }
   }
 
-  // MCP mutations
   function updateServer(name: string, patch: Partial<MCPServer>) {
     setMcpConfig(prev => {
       const next = deepClone(prev);
@@ -458,6 +550,486 @@ export default function SettingsView() {
   const s = settings;
   const integ = s?.integrations;
 
+  // ── Count stats for sidebar badges ────────────────────────────────────────
+
+  const configuredProviders = modelData?.providers.filter(p => p.configured).length ?? 0;
+  const channelCount = [integ?.telegram.configured, integ?.slack?.configured].filter(Boolean).length;
+  const integCount = [integ?.searxng.configured, integ?.sonarqube.configured, integ?.gitleaks.configured, integ?.semgrep.configured, integ?.trivy.configured].filter(Boolean).length;
+  const connectedServers = mcpStatus.servers.filter(s => s.connected).length;
+
+  // ── Section renderers ────────────────────────────────────────────────────
+
+  function renderGeneral() {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+        {/* Quick stats */}
+        {s && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {[
+              { label: "Company", value: s.system.companyName, color: "var(--accent)" },
+              { label: "Provider", value: s.llm.provider, color: "var(--purple)" },
+              { label: "Model", value: s.llm.model.split("/").pop() ?? s.llm.model, color: "var(--blue)" },
+              { label: "Dashboard", value: `:${s.system.dashboardPort}`, color: "var(--green)" },
+            ].map((stat) => (
+              <div key={stat.label} style={{
+                flex: "1 1 120px", padding: "14px 16px",
+                background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8,
+              }}>
+                <div style={{ fontSize: 16, fontWeight: 700, color: stat.color, lineHeight: 1.2, fontVariantNumeric: "tabular-nums" }}>
+                  {stat.value}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{stat.label}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* System config */}
+        <div>
+          <SectionLabel title="System" />
+          <div className="vec-card" style={{ padding: "4px 16px" }}>
+            {s ? (
+              <>
+                <ConfigRow label="Company Name" value={s.system.companyName} icon={<Globe size={13} />} />
+                <ConfigRow label="CLI Enabled" value={s.system.cliEnabled} />
+                <ConfigRow label="PM Proactive Loop" value={s.proactive.enabled} />
+                {s.proactive.enabled && (
+                  <ConfigRow label="Proactive Interval" value={`${s.proactive.intervalSecs}s`} />
+                )}
+                <ConfigRow label="Dashboard Port" value={s.system.dashboardPort} icon={<Hash size={13} />} />
+                <ConfigRow label="Debounce Window" value={`${s.system.debounceMs}ms`} />
+                <ConfigRow label="Context Window" value={`${(s.system.contextWindow / 1000).toFixed(0)}K tokens`} />
+                <ConfigRow label="Compact Threshold" value={`${(s.system.compactThreshold * 100).toFixed(0)}%`} />
+              </>
+            ) : (
+              <div style={{ padding: 20, color: "var(--text-muted)", fontSize: 12, textAlign: "center" }}>Loading...</div>
+            )}
+          </div>
+        </div>
+
+        {/* LLM Defaults */}
+        <div>
+          <SectionLabel title="LLM Defaults" />
+          <div className="vec-card" style={{ padding: "4px 16px" }}>
+            {s ? (
+              <>
+                <ConfigRow label="Provider" value={s.llm.provider} icon={<Cpu size={13} />} />
+                <ConfigRow label="Model" value={s.llm.model} icon={<Box size={13} />} />
+                <ConfigRow label="Thinking Level" value={s.llm.thinkingLevel} />
+                <ConfigRow label="Temperature" value={s.llm.temperature} />
+                <ConfigRow label="Max Tokens" value={s.llm.maxTokens.toLocaleString()} />
+              </>
+            ) : (
+              <div style={{ padding: 20, color: "var(--text-muted)", fontSize: 12, textAlign: "center" }}>Loading...</div>
+            )}
+          </div>
+          <div style={{
+            fontSize: 11, color: "var(--text-muted)", marginTop: 8, paddingLeft: 2,
+          }}>
+            Environment defaults — overridden by model priority tiers when set.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderModels() {
+    if (!modelData) {
+      return <div style={{ padding: 20, color: "var(--text-muted)", fontSize: 12, textAlign: "center" }}>Loading...</div>;
+    }
+
+    const configured = modelData.providers.filter(p => p.configured);
+    const unconfigured = modelData.providers.filter(p => !p.configured);
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+        {/* Provider stats */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {[
+            { label: "Providers Ready", value: String(configured.length), color: "var(--green)" },
+            { label: "Total Models", value: String(modelData.providers.reduce((a, p) => a + p.models.length, 0)), color: "var(--blue)" },
+            { label: "Priority Tiers Set", value: String([modelData.config.primary, modelData.config.secondary, modelData.config.fallback].filter(Boolean).length) + "/3", color: "var(--purple)" },
+            { label: "Agent Overrides", value: String(Object.keys(modelData.config.agentModels).length), color: "var(--orange)" },
+          ].map((stat) => (
+            <div key={stat.label} style={{
+              flex: "1 1 120px", padding: "14px 16px",
+              background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8,
+            }}>
+              <div style={{ fontSize: 22, fontWeight: 700, color: stat.color, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+                {stat.value}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{stat.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Configured providers */}
+        <div>
+          <SectionLabel title="Configured Providers" count={configured.length} />
+          <div style={{
+            display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+            gap: 8,
+          }}>
+            {configured.map((p) => (
+              <ProviderCard key={p.id} provider={p} isEditing={editingProvider === p.id}
+                keyInput={keyInput} keySaving={keySaving}
+                onToggleEdit={() => {
+                  if (editingProvider === p.id) { setEditingProvider(null); setKeyInput(""); }
+                  else { setEditingProvider(p.id); setKeyInput(""); }
+                }}
+                onKeyChange={setKeyInput}
+                onSave={() => saveProviderKey(p.id)}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Unconfigured providers */}
+        {unconfigured.length > 0 && (
+          <div>
+            <SectionLabel title="Available Providers" count={unconfigured.length} />
+            <div style={{
+              display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+              gap: 8,
+            }}>
+              {unconfigured.map((p) => (
+                <ProviderCard key={p.id} provider={p} isEditing={editingProvider === p.id}
+                  keyInput={keyInput} keySaving={keySaving}
+                  onToggleEdit={() => {
+                    if (editingProvider === p.id) { setEditingProvider(null); setKeyInput(""); }
+                    else { setEditingProvider(p.id); setKeyInput(""); }
+                  }}
+                  onKeyChange={setKeyInput}
+                  onSave={() => saveProviderKey(p.id)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Priority tiers */}
+        <div>
+          <SectionLabel title="Model Priority" />
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {(["primary", "secondary", "fallback"] as const).map((tier) => {
+              const slot = modelData.config[tier];
+              const tierColors = {
+                primary: "var(--accent)",
+                secondary: "var(--yellow)",
+                fallback: "var(--text-muted)",
+              };
+              const tierIcons = {
+                primary: <Star size={14} />,
+                secondary: <Cpu size={14} />,
+                fallback: <Shield size={14} />,
+              };
+              const provs = modelData.providers.filter((p) => p.configured);
+              return (
+                <ModelTierRow
+                  key={tier}
+                  tier={tier}
+                  slot={slot}
+                  color={tierColors[tier]}
+                  icon={tierIcons[tier]}
+                  providers={provs}
+                  onSave={(s) => saveModelTier(tier, s)}
+                  saving={modelSaving}
+                />
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Per-agent overrides */}
+        {Object.keys(modelData.config.agentModels).length > 0 && (
+          <div>
+            <SectionLabel title="Agent Overrides" count={Object.keys(modelData.config.agentModels).length} />
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {Object.entries(modelData.config.agentModels).map(([agentId, s]) => (
+                <span key={agentId} style={{
+                  fontSize: 12, padding: "6px 12px", borderRadius: 7,
+                  background: "var(--bg-card)", border: "1px solid var(--border)",
+                  color: "var(--text-secondary)", fontFamily: "monospace",
+                }}>
+                  @{agentId} &rarr; {s.provider}/{s.model.split("/").pop()}
+                </span>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8, paddingLeft: 2 }}>
+              Per-agent models can be configured from the Directory view.
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderChannels() {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+        {/* Stats */}
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{
+            flex: "1 1 140px", padding: "14px 16px",
+            background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8,
+          }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: "var(--blue)", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+              {channelCount}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Active Channels</div>
+          </div>
+          <div style={{
+            flex: "1 1 140px", padding: "14px 16px",
+            background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8,
+          }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: "var(--text-muted)", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+              {2 - channelCount}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Not Configured</div>
+          </div>
+        </div>
+
+        {/* Channel cards */}
+        <div>
+          <SectionLabel title="Communication Channels" />
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <ChannelCard
+              name="Telegram"
+              logoUrl="/icons/integrations/telegram.svg"
+              fallbackIcon={<MessageSquare size={18} />}
+              configured={integ?.telegram.configured ?? false}
+              detail={integ?.telegram.configured ? `Chat ID: ${integ.telegram.chatId}` : undefined}
+              color="var(--blue)"
+              envHint="TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID"
+            />
+            <ChannelCard
+              name="Slack"
+              logoUrl="/icons/integrations/slack.svg"
+              fallbackIcon={<Hash size={18} />}
+              configured={integ?.slack?.configured ?? false}
+              detail={integ?.slack?.configured ? `Channel: ${integ.slack.channelId}` : undefined}
+              color="var(--purple)"
+              envHint="SLACK_BOT_TOKEN + SLACK_APP_TOKEN + SLACK_CHANNEL_ID"
+            />
+          </div>
+        </div>
+
+        <div style={{
+          padding: "14px 16px", borderRadius: 8,
+          background: "var(--bg-tertiary)", border: "1px solid var(--border)",
+          fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6,
+        }}>
+          Channels are configured via environment variables in your <code style={{
+            fontFamily: "monospace", fontSize: 11, background: "var(--bg-card)",
+            padding: "1px 5px", borderRadius: 3,
+          }}>.env</code> file. Restart the server after making changes.
+        </div>
+      </div>
+    );
+  }
+
+  function renderIntegrations() {
+    const ICON_BASE = "/icons/integrations";
+
+    const categories: { title: string; color: string; items: { name: string; logoUrl: string; fallbackIcon: React.ReactNode; configured: boolean; detail: string; color: string; subtitle: string }[] }[] = [
+      {
+        title: "Search",
+        color: "var(--green)",
+        items: [
+          {
+            name: "SearXNG", logoUrl: `${ICON_BASE}/searxng.svg`, fallbackIcon: <Search size={16} />,
+            configured: integ?.searxng.configured ?? false,
+            detail: integ?.searxng.configured ? integ.searxng.url : "Set SEARXNG_URL to enable",
+            color: "var(--green)", subtitle: "WEB SEARCH",
+          },
+        ],
+      },
+      {
+        title: "Code Quality",
+        color: "var(--blue)",
+        items: [
+          {
+            name: "SonarQube", logoUrl: `${ICON_BASE}/sonarqube.svg`, fallbackIcon: <Eye size={16} />,
+            configured: integ?.sonarqube.configured ?? false,
+            detail: integ?.sonarqube.configured ? `${integ.sonarqube.hostUrl} (${integ.sonarqube.projectKey})` : "Set SONAR_TOKEN to enable",
+            color: "var(--blue)", subtitle: "ANALYSIS",
+          },
+        ],
+      },
+      {
+        title: "Security Scanners",
+        color: "var(--red)",
+        items: [
+          {
+            name: "Gitleaks", logoUrl: `${ICON_BASE}/gitleaks.svg`, fallbackIcon: <Shield size={16} />,
+            configured: integ?.gitleaks.configured ?? false,
+            detail: "Secret scanning — detects hardcoded credentials via Docker",
+            color: "var(--red)", subtitle: "SECRETS",
+          },
+          {
+            name: "Semgrep", logoUrl: `${ICON_BASE}/semgrep.svg`, fallbackIcon: <Shield size={16} />,
+            configured: integ?.semgrep.configured ?? false,
+            detail: "SAST — static analysis for OWASP Top 10 vulnerabilities",
+            color: "var(--orange)", subtitle: "SAST",
+          },
+          {
+            name: "Trivy", logoUrl: `${ICON_BASE}/trivy.svg`, fallbackIcon: <Database size={16} />,
+            configured: integ?.trivy.configured ?? false,
+            detail: "SCA — scans dependencies for known CVEs",
+            color: "var(--purple)", subtitle: "SCA",
+          },
+        ],
+      },
+    ];
+
+    const allItems = categories.flatMap(c => c.items);
+    const activeCount = allItems.filter(i => i.configured).length;
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+        {/* Stats */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {[
+            { label: "Active", value: String(activeCount), color: "var(--green)" },
+            { label: "Total", value: String(allItems.length), color: "var(--orange)" },
+            { label: "Categories", value: String(categories.length), color: "var(--blue)" },
+          ].map((stat) => (
+            <div key={stat.label} style={{
+              flex: "1 1 120px", padding: "14px 16px",
+              background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8,
+            }}>
+              <div style={{ fontSize: 22, fontWeight: 700, color: stat.color, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+                {stat.value}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{stat.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Categorized integrations */}
+        {categories.map((cat) => (
+          <div key={cat.title}>
+            <SectionLabel title={cat.title} count={cat.items.length} />
+            <div style={{
+              display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+              gap: 8,
+            }}>
+              {cat.items.map((item) => (
+                <IntegrationCard key={item.name} {...item} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  function renderMCP() {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+        {/* Stats */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {[
+            { label: "Configured", value: String(serverNames.length), color: "var(--blue)" },
+            { label: "Connected", value: String(connectedServers), color: "var(--green)" },
+            { label: "Tools Available", value: String(mcpStatus.servers.reduce((a, s) => a + s.tools.length, 0)), color: "var(--purple)" },
+            { label: "Directory", value: String(MCP_DIRECTORY.length), color: "var(--text-muted)" },
+          ].map((stat) => (
+            <div key={stat.label} style={{
+              flex: "1 1 100px", padding: "14px 16px",
+              background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8,
+            }}>
+              <div style={{ fontSize: 22, fontWeight: 700, color: stat.color, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+                {stat.value}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{stat.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Action bar */}
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+        }}>
+          <div style={{ flex: 1 }} />
+          <button onClick={fetchMCP} style={btnSecondary} title="Refresh status">
+            <RefreshCw size={12} /> Refresh
+          </button>
+          {dirty && (
+            <button onClick={saveConfig} disabled={saving} style={{
+              display: "flex", alignItems: "center", gap: 5,
+              padding: "6px 14px", borderRadius: 7, border: "none",
+              background: "var(--accent)", color: "#fff",
+              cursor: saving ? "wait" : "pointer", fontSize: 11,
+              fontWeight: 600, fontFamily: "inherit",
+              opacity: saving ? 0.7 : 1, transition: "opacity 0.12s",
+            }}>
+              <Save size={11} /> {saving ? "Saving..." : "Save Changes"}
+            </button>
+          )}
+        </div>
+
+        {/* Server Directory + Custom Servers */}
+        <MCPDirectoryPanel
+          activeServerNames={serverNames}
+          mcpConfig={mcpConfig}
+          mcpStatus={mcpStatus}
+          onAdd={(entry, envOverrides) => {
+            const env: Record<string, string> = {};
+            for (const k of Object.keys(entry.envVars)) {
+              env[k] = envOverrides?.[k] ?? "";
+            }
+            setMcpConfig(prev => {
+              const next = deepClone(prev);
+              next.mcpServers[entry.id] = {
+                command: entry.command,
+                args: [...entry.args],
+                env,
+              };
+              return next;
+            });
+            setDirty(true);
+            showToast(`Added "${entry.name}" — click Save to apply`);
+          }}
+          onRemove={(name) => { removeServer(name); }}
+          onAddCustom={(name, srv) => {
+            setMcpConfig(prev => {
+              const next = deepClone(prev);
+              next.mcpServers[name] = srv;
+              return next;
+            });
+            setExpanded(prev => ({ ...prev, [name]: true }));
+            setDirty(true);
+            showToast(`Added "${name}" — click Save to apply`);
+          }}
+          onUpdateCustom={(name, patch) => { updateServer(name, patch); }}
+          onRemoveCustomEnv={(serverName, key) => { removeEnvVar(serverName, key); }}
+          onAddCustomEnv={(name) => { addEnvVar(name); }}
+          expanded={expanded}
+          onToggleExpand={(name) => { setExpanded(p => ({ ...p, [name]: !p[name] })); }}
+        />
+      </div>
+    );
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  const sectionRenderers: Record<SettingsSection, () => React.ReactNode> = {
+    general: renderGeneral,
+    models: renderModels,
+    channels: renderChannels,
+    integrations: renderIntegrations,
+    mcp: renderMCP,
+  };
+
+  const sectionBadges: Record<SettingsSection, string | null> = {
+    general: null,
+    models: configuredProviders > 0 ? String(configuredProviders) : null,
+    channels: channelCount > 0 ? String(channelCount) : null,
+    integrations: integCount > 0 ? String(integCount) : null,
+    mcp: serverNames.length > 0 ? String(serverNames.length) : null,
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       {/* Header */}
@@ -468,381 +1040,58 @@ export default function SettingsView() {
         </div>
       </div>
 
-      {/* Content */}
-      <div style={{ flex: 1, overflow: "auto", padding: "0 28px 28px" }}>
-
-        {/* ═══ Integrations ═══ */}
-        <Section title="Integrations" icon={<Zap size={15} style={{ color: "var(--accent)" }} />}>
-          <div style={{
-            display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-            gap: 8,
-          }}>
-            <IntegrationCard
-              name="Telegram"
-              icon={<MessageSquare size={16} />}
-              configured={integ?.telegram.configured ?? false}
-              detail={integ?.telegram.configured ? `Chat: ${integ.telegram.chatId}` : "Set TELEGRAM_BOT_TOKEN + CHAT_ID"}
-              color="var(--blue)"
-            />
-            <IntegrationCard
-              name="Web Search (SearXNG)"
-              icon={<Search size={16} />}
-              configured={integ?.searxng.configured ?? false}
-              detail={integ?.searxng.url ?? "Set SEARXNG_URL"}
-              color="var(--green)"
-            />
-            <IntegrationCard
-              name="SonarQube"
-              icon={<Eye size={16} />}
-              configured={integ?.sonarqube.configured ?? false}
-              detail={integ?.sonarqube.configured
-                ? `${integ.sonarqube.hostUrl} (${integ.sonarqube.projectKey})`
-                : "Set SONAR_TOKEN to enable"}
-              color="var(--blue)"
-            />
-            <IntegrationCard
-              name="Gitleaks"
-              icon={<Shield size={16} />}
-              configured={integ?.gitleaks.configured ?? false}
-              detail="Secret scanning via Docker"
-              color="var(--red)"
-            />
-            <IntegrationCard
-              name="Semgrep"
-              icon={<Shield size={16} />}
-              configured={integ?.semgrep.configured ?? false}
-              detail="SAST — OWASP Top 10 scanning"
-              color="var(--orange)"
-            />
-            <IntegrationCard
-              name="Trivy"
-              icon={<Database size={16} />}
-              configured={integ?.trivy.configured ?? false}
-              detail="SCA — dependency vulnerability scanning"
-              color="var(--purple)"
-            />
-          </div>
-        </Section>
-
-        {/* ═══ Models ═══ */}
-        <Section title="Models" icon={<Box size={15} style={{ color: "var(--purple)" }} />}>
-          {modelData ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {/* Provider list */}
-              <div>
-                <div style={{
-                  fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
-                  textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8,
-                }}>
-                  Providers
-                </div>
-                <div style={{
-                  display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-                  gap: 8,
-                }}>
-                  {modelData.providers.map((p) => {
-                    const isEditing = editingProvider === p.id;
-                    return (
-                      <div key={p.id} style={{
-                        display: "flex", flexDirection: "column", gap: 8,
-                        padding: "10px 12px", borderRadius: 8,
-                        background: "var(--bg-card)",
-                        border: isEditing ? "1px solid var(--accent)" : "1px solid var(--border)",
-                        transition: "border-color 0.15s",
-                      }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <img
-                            src={p.iconUrl}
-                            alt={p.name}
-                            style={{
-                              width: 22, height: 22, flexShrink: 0, borderRadius: 4,
-                              filter: "var(--icon-filter, none)",
-                            }}
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                          />
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
-                              {p.name}
-                            </div>
-                            <div style={{
-                              fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace",
-                            }}>
-                              {p.models.length} models · {p.envKey || "—"}
-                            </div>
-                          </div>
-                          <span style={{
-                            fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4,
-                            background: p.configured
-                              ? "color-mix(in srgb, var(--green) 12%, transparent)"
-                              : "var(--bg-tertiary)",
-                            color: p.configured ? "var(--green)" : "var(--text-muted)",
-                          }}>
-                            {p.configured ? "READY" : "NO KEY"}
-                          </span>
-                          <button
-                            onClick={() => {
-                              if (isEditing) { setEditingProvider(null); setKeyInput(""); }
-                              else { setEditingProvider(p.id); setKeyInput(""); }
-                            }}
-                            style={{
-                              fontSize: 10, fontWeight: 500, padding: "3px 8px", borderRadius: 5,
-                              border: "1px solid var(--border)", background: "transparent",
-                              color: isEditing ? "var(--accent)" : "var(--text-muted)",
-                              cursor: "pointer", fontFamily: "inherit",
-                            }}
-                          >
-                            {isEditing ? "Cancel" : p.configured ? "Edit Key" : "Set Key"}
-                          </button>
-                        </div>
-                        {isEditing && (
-                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                            <input
-                              value={keyInput}
-                              onChange={(e) => setKeyInput(e.target.value)}
-                              placeholder={`Paste ${p.envKey || "API key"}...`}
-                              type="password"
-                              autoFocus
-                              style={{ ...inputStyle, flex: 1, fontSize: 12, fontFamily: "monospace" }}
-                              onKeyDown={(e) => e.key === "Enter" && keyInput.trim() && saveProviderKey(p.id)}
-                            />
-                            <button
-                              onClick={() => saveProviderKey(p.id)}
-                              disabled={!keyInput.trim() || keySaving}
-                              style={{
-                                display: "flex", alignItems: "center", gap: 4,
-                                padding: "7px 12px", borderRadius: 6, border: "none",
-                                background: keyInput.trim() ? "var(--accent)" : "var(--bg-tertiary)",
-                                color: keyInput.trim() ? "#fff" : "var(--text-muted)",
-                                fontSize: 11, fontWeight: 600,
-                                cursor: keyInput.trim() ? "pointer" : "default",
-                                fontFamily: "inherit", flexShrink: 0,
-                                opacity: keySaving ? 0.5 : 1,
-                              }}
-                            >
-                              <Save size={11} /> Save
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Priority tiers */}
-              <div>
-                <div style={{
-                  fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
-                  textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8,
-                }}>
-                  Model Priority
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {(["primary", "secondary", "fallback"] as const).map((tier) => {
-                    const slot = modelData.config[tier];
-                    const tierColors = {
-                      primary: "var(--accent)",
-                      secondary: "var(--yellow)",
-                      fallback: "var(--text-muted)",
-                    };
-                    const tierIcons = {
-                      primary: <Star size={12} />,
-                      secondary: <Cpu size={12} />,
-                      fallback: <Shield size={12} />,
-                    };
-                    const configuredProviders = modelData.providers.filter((p) => p.configured);
-                    return (
-                      <ModelTierRow
-                        key={tier}
-                        tier={tier}
-                        slot={slot}
-                        color={tierColors[tier]}
-                        icon={tierIcons[tier]}
-                        providers={configuredProviders}
-                        onSave={(s) => saveModelTier(tier, s)}
-                        saving={modelSaving}
-                      />
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Per-agent overrides summary */}
-              {Object.keys(modelData.config.agentModels).length > 0 && (
-                <div>
-                  <div style={{
-                    fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
-                    textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8,
-                  }}>
-                    Agent Overrides
-                  </div>
-                  <div style={{
-                    display: "flex", flexWrap: "wrap", gap: 6,
-                  }}>
-                    {Object.entries(modelData.config.agentModels).map(([agentId, s]) => (
-                      <span key={agentId} style={{
-                        fontSize: 11, padding: "4px 10px", borderRadius: 6,
-                        background: "var(--bg-card)", border: "1px solid var(--border)",
-                        color: "var(--text-secondary)", fontFamily: "monospace",
-                      }}>
-                        @{agentId} → {s.provider}/{s.model.split("/").pop()}
-                      </span>
-                    ))}
-                  </div>
-                  <div style={{
-                    fontSize: 11, color: "var(--text-muted)", marginTop: 6, paddingLeft: 2,
-                  }}>
-                    Per-agent models can be configured from the Directory view.
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div style={{ padding: 16, color: "var(--text-muted)", fontSize: 12, textAlign: "center" }}>Loading...</div>
-          )}
-        </Section>
-
-        {/* ═══ LLM Configuration ═══ */}
-        <Section title="LLM Defaults" icon={<Cpu size={15} style={{ color: "var(--purple)" }} />}>
-          <div style={{
-            background: "var(--bg-card)", border: "1px solid var(--border)",
-            borderRadius: 10, padding: "4px 14px",
-          }}>
-            {s ? (
-              <>
-                <ConfigRow label="Provider (env)" value={s.llm.provider} />
-                <ConfigRow label="Model (env)" value={s.llm.model} />
-                <ConfigRow label="Thinking Level" value={s.llm.thinkingLevel} />
-                <ConfigRow label="Temperature" value={s.llm.temperature} />
-                <ConfigRow label="Max Tokens" value={s.llm.maxTokens.toLocaleString()} />
-              </>
-            ) : (
-              <div style={{ padding: 16, color: "var(--text-muted)", fontSize: 12, textAlign: "center" }}>Loading...</div>
-            )}
-          </div>
-          <div style={{
-            fontSize: 11, color: "var(--text-muted)", marginTop: 8, paddingLeft: 2,
-          }}>
-            Environment defaults — overridden by Models priority above when set.
-          </div>
-        </Section>
-
-        {/* ═══ System ═══ */}
-        <Section title="System" icon={<Settings2 size={15} style={{ color: "var(--green)" }} />}>
-          <div style={{
-            background: "var(--bg-card)", border: "1px solid var(--border)",
-            borderRadius: 10, padding: "4px 14px",
-          }}>
-            {s ? (
-              <>
-                <ConfigRow label="Company Name" value={s.system.companyName} />
-                <ConfigRow label="CLI" value={s.system.cliEnabled} />
-                <ConfigRow label="PM Proactive Loop" value={s.proactive.enabled} />
-                {s.proactive.enabled && (
-                  <ConfigRow label="Proactive Interval" value={`${s.proactive.intervalSecs}s`} />
-                )}
-                <ConfigRow label="Dashboard Port" value={s.system.dashboardPort} />
-                <ConfigRow label="Debounce Window" value={`${s.system.debounceMs}ms`} />
-                <ConfigRow label="Context Window" value={`${(s.system.contextWindow / 1000).toFixed(0)}K tokens`} />
-                <ConfigRow label="Compact Threshold" value={`${(s.system.compactThreshold * 100).toFixed(0)}%`} />
-              </>
-            ) : (
-              <div style={{ padding: 16, color: "var(--text-muted)", fontSize: 12, textAlign: "center" }}>Loading...</div>
-            )}
-          </div>
-        </Section>
-
-        {/* ═══ MCP Servers ═══ */}
-        <Section
-          title={`MCP Servers (${serverNames.length} active)`}
-          icon={<Server size={15} style={{ color: "var(--orange)" }} />}
-          defaultOpen={false}
-        >
-          {/* Top bar: status + save */}
-          <div style={{
-            display: "flex", alignItems: "center", gap: 8, marginBottom: 14,
-          }}>
-            <div style={{
-              fontSize: 11, color: "var(--text-muted)", flex: 1,
-            }}>
-              {serverNames.length > 0 && (
-                <span>
-                  {serverNames.length} server{serverNames.length !== 1 ? "s" : ""} configured
-                  {mcpStatus.servers.filter(s => s.connected).length > 0 && (
-                    <span style={{ color: "var(--green)", marginLeft: 6 }}>
-                      &bull; {mcpStatus.servers.filter(s => s.connected).length} connected
-                    </span>
-                  )}
+      {/* Sidebar + Content */}
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+        {/* Sidebar */}
+        <div style={{
+          width: 190, flexShrink: 0, padding: "12px 12px 20px",
+          borderRight: "1px solid var(--border)",
+          display: "flex", flexDirection: "column", gap: 2,
+          overflow: "auto",
+        }}>
+          {SECTION_NAV.map((item) => {
+            const isActive = activeSection === item.key;
+            const badge = sectionBadges[item.key];
+            return (
+              <button
+                key={item.key}
+                onClick={() => setActiveSection(item.key)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "9px 12px", borderRadius: 7,
+                  border: "none",
+                  background: isActive ? "var(--bg-hover)" : "transparent",
+                  color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
+                  fontSize: 13, fontWeight: isActive ? 500 : 400,
+                  cursor: "pointer", fontFamily: "inherit",
+                  textAlign: "left", width: "100%",
+                  transition: "background 0.08s, color 0.08s",
+                }}
+              >
+                <span style={{ color: isActive ? item.color : "var(--text-muted)", display: "flex", transition: "color 0.08s" }}>
+                  {item.icon}
                 </span>
-              )}
-            </div>
-            <button onClick={fetchMCP} style={btnSecondary} title="Refresh status">
-              <RefreshCw size={12} />
-            </button>
-            {dirty && (
-              <button onClick={saveConfig} disabled={saving} style={{
-                display: "flex", alignItems: "center", gap: 5,
-                padding: "5px 12px", borderRadius: 6, border: "none",
-                background: "var(--accent)", color: "#fff",
-                cursor: saving ? "wait" : "pointer", fontSize: 11,
-                fontWeight: 600, fontFamily: "inherit",
-                opacity: saving ? 0.7 : 1,
-              }}>
-                <Save size={11} /> {saving ? "Saving..." : "Save"}
+                <span style={{ flex: 1 }}>{item.label}</span>
+                {badge && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 4,
+                    background: isActive ? `color-mix(in srgb, ${item.color} 12%, transparent)` : "var(--bg-tertiary)",
+                    color: isActive ? item.color : "var(--text-muted)",
+                    fontVariantNumeric: "tabular-nums",
+                    transition: "background 0.08s, color 0.08s",
+                  }}>
+                    {badge}
+                  </span>
+                )}
               </button>
-            )}
-          </div>
+            );
+          })}
+        </div>
 
-          {/* ── Server Directory + Custom Servers ─────────────────── */}
-          <MCPDirectoryPanel
-            activeServerNames={serverNames}
-            mcpConfig={mcpConfig}
-            mcpStatus={mcpStatus}
-            onAdd={(entry, envOverrides) => {
-              const env: Record<string, string> = {};
-              for (const k of Object.keys(entry.envVars)) {
-                env[k] = envOverrides?.[k] ?? "";
-              }
-              setMcpConfig(prev => {
-                const next = deepClone(prev);
-                next.mcpServers[entry.id] = {
-                  command: entry.command,
-                  args: [...entry.args],
-                  env,
-                };
-                return next;
-              });
-              setDirty(true);
-              showToast(`Added "${entry.name}" — click Save to apply`);
-            }}
-            onRemove={(name) => {
-              removeServer(name);
-            }}
-            onAddCustom={(name, srv) => {
-              setMcpConfig(prev => {
-                const next = deepClone(prev);
-                next.mcpServers[name] = srv;
-                return next;
-              });
-              setExpanded(prev => ({ ...prev, [name]: true }));
-              setDirty(true);
-              showToast(`Added "${name}" — click Save to apply`);
-            }}
-            onUpdateCustom={(name, patch) => {
-              updateServer(name, patch);
-            }}
-            onRemoveCustomEnv={(serverName, key) => {
-              removeEnvVar(serverName, key);
-            }}
-            onAddCustomEnv={(name) => {
-              addEnvVar(name);
-            }}
-            expanded={expanded}
-            onToggleExpand={(name) => {
-              setExpanded(p => ({ ...p, [name]: !p[name] }));
-            }}
-          />
-        </Section>
+        {/* Content */}
+        <div style={{ flex: 1, overflow: "auto", padding: "20px 28px 28px" }}>
+          {sectionRenderers[activeSection]()}
+        </div>
       </div>
 
       {/* Toast */}
@@ -852,8 +1101,8 @@ export default function SettingsView() {
           background: "var(--bg-card)", border: "1px solid var(--border)",
           borderRadius: 8, padding: "10px 18px",
           fontSize: 13, color: "var(--text-primary)",
-          boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
-          zIndex: 9999,
+          boxShadow: "var(--shadow-lg)",
+          zIndex: 9999, animation: "fade-in 0.12s ease-out",
         }}>
           {toast}
         </div>
@@ -862,15 +1111,100 @@ export default function SettingsView() {
   );
 }
 
+// ── Provider Card ───────────────────────────────────────────────────────────
+
+function ProviderCard({ provider: p, isEditing, keyInput, keySaving, onToggleEdit, onKeyChange, onSave }: {
+  provider: ProviderInfo;
+  isEditing: boolean;
+  keyInput: string;
+  keySaving: boolean;
+  onToggleEdit: () => void;
+  onKeyChange: (v: string) => void;
+  onSave: () => void;
+}) {
+  return (
+    <div style={{
+      display: "flex", flexDirection: "column", gap: 8,
+      padding: "12px 14px", borderRadius: 10,
+      background: "var(--bg-card)",
+      border: isEditing ? "1px solid var(--accent)" : "1px solid var(--border)",
+      transition: "border-color 0.15s",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <img
+          src={p.iconUrl}
+          alt={p.name}
+          style={{
+            width: 24, height: 24, flexShrink: 0, borderRadius: 5,
+            filter: "var(--icon-filter, none)",
+          }}
+          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+        />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
+            {p.name}
+          </div>
+          <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace" }}>
+            {p.models.length} models
+          </div>
+        </div>
+        <div style={{
+          width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+          background: p.configured ? "var(--green)" : "var(--text-muted)",
+          opacity: p.configured ? 1 : 0.3,
+        }} />
+      </div>
+      <button
+        onClick={onToggleEdit}
+        style={{
+          fontSize: 11, fontWeight: 500, padding: "5px 0", borderRadius: 6, width: "100%",
+          border: "1px solid var(--border)", background: "var(--bg-tertiary)",
+          color: isEditing ? "var(--accent)" : "var(--text-muted)",
+          cursor: "pointer", fontFamily: "inherit",
+          transition: "color 0.12s, border-color 0.12s",
+        }}
+      >
+        {isEditing ? "Cancel" : p.configured ? "Edit Key" : "Set Key"}
+      </button>
+      {isEditing && (
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <input
+            value={keyInput}
+            onChange={(e) => onKeyChange(e.target.value)}
+            placeholder={`Paste ${p.envKey || "API key"}...`}
+            type="password"
+            autoFocus
+            style={{ ...inputStyle, flex: 1, fontSize: 12, fontFamily: "monospace" }}
+            onKeyDown={(e) => e.key === "Enter" && keyInput.trim() && onSave()}
+          />
+          <button
+            onClick={onSave}
+            disabled={!keyInput.trim() || keySaving}
+            style={{
+              display: "flex", alignItems: "center", gap: 4,
+              padding: "7px 12px", borderRadius: 7, border: "none",
+              background: keyInput.trim() ? "var(--accent)" : "var(--bg-tertiary)",
+              color: keyInput.trim() ? "#fff" : "var(--text-muted)",
+              fontSize: 11, fontWeight: 600,
+              cursor: keyInput.trim() ? "pointer" : "default",
+              fontFamily: "inherit", flexShrink: 0,
+              opacity: keySaving ? 0.5 : 1, transition: "opacity 0.12s",
+            }}
+          >
+            <Save size={11} /> Save
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── MCP Directory Panel ─────────────────────────────────────────────────────
 
-const ALL_CATEGORIES: MCPCategory[] = [
-  "dev-tools", "files", "browser", "search", "database",
-  "productivity", "cloud", "communication", "ai", "design", "other",
-];
-
-/** IDs of all directory-known servers */
 const DIRECTORY_IDS = new Set(MCP_DIRECTORY.map(e => e.id));
+
+/** Categories that have at least one entry in the directory */
+const USED_CATEGORIES = Array.from(new Set(MCP_DIRECTORY.map(e => e.category)));
 
 function MCPDirectoryPanel({ activeServerNames, mcpConfig, mcpStatus, onAdd, onRemove, onAddCustom, onUpdateCustom, onRemoveCustomEnv, onAddCustomEnv, expanded, onToggleExpand }: {
   activeServerNames: string[];
@@ -887,6 +1221,7 @@ function MCPDirectoryPanel({ activeServerNames, mcpConfig, mcpStatus, onAdd, onR
 }) {
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState<MCPCategory | "all">("all");
+  const [showDirectory, setShowDirectory] = useState(false);
   const [setupEntry, setSetupEntry] = useState<MCPDirectoryEntry | null>(null);
   const [envInputs, setEnvInputs] = useState<Record<string, string>>({});
   const [showCustom, setShowCustom] = useState(false);
@@ -897,16 +1232,28 @@ function MCPDirectoryPanel({ activeServerNames, mcpConfig, mcpStatus, onAdd, onR
   const [customEnvVal, setCustomEnvVal] = useState("");
   const [customEnv, setCustomEnv] = useState<Record<string, string>>({});
 
-  // Separate custom servers (not in directory) from directory ones
   const customServerNames = activeServerNames.filter(n => !DIRECTORY_IDS.has(n));
+
+  // Active directory servers (ones that are added)
+  const activeDirectoryEntries = MCP_DIRECTORY.filter(e => activeServerNames.includes(e.id));
 
   const q = search.toLowerCase();
   const filtered = MCP_DIRECTORY.filter(e => {
+    if (activeServerNames.includes(e.id)) return false; // hide already-added from browse
     if (catFilter !== "all" && e.category !== catFilter) return false;
     if (q && !e.name.toLowerCase().includes(q) && !e.description.toLowerCase().includes(q)
       && !e.tools.some(t => t.toLowerCase().includes(q))) return false;
     return true;
   });
+
+  // Category dropdown options
+  const categoryOptions: DropdownOption[] = [
+    { value: "all", label: "All Categories" },
+    ...USED_CATEGORIES.map(c => ({
+      value: c,
+      label: CATEGORY_META[c].label,
+    })),
+  ];
 
   function handleAddClick(entry: MCPDirectoryEntry) {
     const hasEnv = Object.keys(entry.envVars).length > 0;
@@ -944,262 +1291,57 @@ function MCPDirectoryPanel({ activeServerNames, mcpConfig, mcpStatus, onAdd, onR
   }
 
   return (
-    <div>
-      {/* ── Server Directory header ──────────────────────────── */}
-      <div style={{
-        fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
-        textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10,
-      }}>
-        Server Directory
-      </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
 
-      {/* Search + filter bar */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
-        <div style={{ position: "relative", flex: 1, minWidth: 180 }}>
-          <Search size={13} style={{
-            position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)",
-            color: "var(--text-muted)", pointerEvents: "none",
-          }} />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search servers or tools..."
-            style={{ ...inputStyle, paddingLeft: 30 }}
-          />
-        </div>
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-          <FilterChip label="All" active={catFilter === "all"} onClick={() => setCatFilter("all")} color="var(--text-muted)" />
-          {ALL_CATEGORIES.filter(c => MCP_DIRECTORY.some(e => e.category === c)).map(c => (
-            <FilterChip
-              key={c}
-              label={CATEGORY_META[c].label}
-              active={catFilter === c}
-              onClick={() => setCatFilter(c === catFilter ? "all" : c)}
-              color={CATEGORY_META[c].color}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* Setup panel (env var entry for a directory server) */}
-      {setupEntry && (
-        <div style={{
-          background: "var(--bg-card)", border: "1px solid var(--accent)",
-          borderRadius: 10, padding: 16, marginBottom: 12,
-          animation: "fade-in 0.12s ease-out",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-            <Package size={16} style={{ color: "var(--accent)" }} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
-                Setup: {setupEntry.name}
-              </div>
-              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                Fill in the required environment variables to configure this server.
-              </div>
-            </div>
-            <button onClick={() => { setSetupEntry(null); setEnvInputs({}); }} style={{
-              display: "flex", padding: 4, border: "none", borderRadius: 4,
-              background: "transparent", color: "var(--text-muted)", cursor: "pointer",
-            }}>
-              <X size={14} />
-            </button>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {Object.entries(setupEntry.envVars).map(([varName, hint]) => (
-              <div key={varName} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <span style={{
-                  fontSize: 12, fontFamily: "monospace", color: "var(--text-secondary)",
-                  minWidth: 140, flexShrink: 0,
+      {/* ── Active Servers ── */}
+      {(activeDirectoryEntries.length > 0 || customServerNames.length > 0) && (
+        <div>
+          <SectionLabel title="Active Servers" count={activeServerNames.length} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {/* Directory-based active servers — compact row style */}
+            {activeDirectoryEntries.map(entry => {
+              const live = mcpStatus.servers.find(s => s.name === entry.id);
+              const catMeta = CATEGORY_META[entry.category];
+              return (
+                <div key={entry.id} style={{
+                  display: "flex", alignItems: "center", gap: 12,
+                  padding: "10px 14px", borderRadius: 8,
+                  background: "var(--bg-card)", border: "1px solid var(--border)",
                 }}>
-                  {varName}
-                </span>
-                <input
-                  value={envInputs[varName] ?? ""}
-                  onChange={e => setEnvInputs(p => ({ ...p, [varName]: e.target.value }))}
-                  placeholder={hint}
-                  type="password"
-                  style={{ ...inputStyle, flex: 1, fontFamily: "monospace", fontSize: 12 }}
-                  onKeyDown={e => e.key === "Enter" && confirmSetup()}
-                />
-              </div>
-            ))}
-          </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "flex-end" }}>
-            <button onClick={() => { setSetupEntry(null); setEnvInputs({}); }} style={btnSecondary}>
-              Cancel
-            </button>
-            <button onClick={confirmSetup} style={{
-              display: "flex", alignItems: "center", gap: 5,
-              padding: "6px 14px", borderRadius: 6, border: "none",
-              background: "var(--accent)", color: "#fff",
-              cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit",
-            }}>
-              <Plus size={12} /> Add Server
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Directory grid */}
-      <div style={{
-        display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-        gap: 8, marginBottom: 14,
-      }}>
-        {filtered.map(entry => {
-          const isActive = activeServerNames.includes(entry.id);
-          const catMeta = CATEGORY_META[entry.category];
-          const live = mcpStatus.servers.find(s => s.name === entry.id);
-          return (
-            <div key={entry.id} style={{
-              display: "flex", flexDirection: "column", gap: 8,
-              padding: "12px 14px", borderRadius: 10,
-              background: "var(--bg-card)",
-              border: isActive ? `1px solid color-mix(in srgb, var(--green) 40%, transparent)` : "1px solid var(--border)",
-              transition: "border-color 0.15s",
-            }}>
-              {/* Top row: name + category + connection status */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
-                      {entry.name}
-                    </span>
-                    <span style={{
-                      fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4,
-                      background: `color-mix(in srgb, ${catMeta.color} 12%, transparent)`,
-                      color: catMeta.color,
-                      flexShrink: 0,
-                    }}>
-                      {catMeta.label}
-                    </span>
-                    {isActive && live && (
-                      <span style={{
-                        width: 6, height: 6, borderRadius: "50%",
-                        background: live.connected ? "var(--green)" : "var(--text-muted)",
-                        flexShrink: 0,
-                      }} title={live.connected ? "Connected" : "Disconnected"} />
-                    )}
-                  </div>
                   <div style={{
-                    fontSize: 11, color: "var(--text-muted)", marginTop: 3,
-                    lineHeight: 1.4,
-                    display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-                    overflow: "hidden",
-                  }}>
-                    {entry.description}
-                  </div>
-                </div>
-              </div>
-
-              {/* Tools preview */}
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                {entry.tools.slice(0, 4).map(t => (
-                  <span key={t} style={{
-                    fontSize: 10, padding: "2px 6px", borderRadius: 4,
-                    background: "var(--bg-tertiary)", color: "var(--text-secondary)",
-                    fontFamily: "monospace",
-                  }}>
-                    {t}
+                    width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
+                    background: live?.connected ? "var(--green)" : "var(--text-muted)",
+                    opacity: live?.connected ? 1 : 0.35,
+                  }} />
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", flex: 1 }}>
+                    {entry.name}
                   </span>
-                ))}
-                {entry.tools.length > 4 && (
                   <span style={{
-                    fontSize: 10, padding: "2px 6px", borderRadius: 4,
-                    background: "var(--bg-tertiary)", color: "var(--text-muted)",
-                  }}>
-                    +{entry.tools.length - 4} more
-                  </span>
-                )}
-              </div>
-
-              {/* Bottom row: package + add/remove button */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: "auto" }}>
-                <span style={{
-                  fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace",
-                  flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                }}>
-                  {entry.package}
-                </span>
-                {Object.keys(entry.envVars).length > 0 && (
-                  <span style={{
-                    fontSize: 9, padding: "2px 5px", borderRadius: 3,
-                    background: "color-mix(in srgb, var(--yellow) 12%, transparent)",
-                    color: "var(--yellow)", flexShrink: 0,
-                  }}>
-                    KEY
-                  </span>
-                )}
-                {entry.docsUrl && (
-                  <a
-                    href={entry.docsUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      display: "flex", padding: 4, borderRadius: 4,
-                      color: "var(--text-muted)", flexShrink: 0,
-                    }}
-                    title="Docs"
-                  >
-                    <ExternalLink size={12} />
-                  </a>
-                )}
-                {isActive ? (
+                    fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4,
+                    background: `color-mix(in srgb, ${catMeta.color} 10%, transparent)`,
+                    color: catMeta.color,
+                  }}>{catMeta.label}</span>
+                  {live?.connected && (
+                    <span style={{ fontSize: 11, color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" }}>
+                      {live.tools.length} tool{live.tools.length !== 1 ? "s" : ""}
+                    </span>
+                  )}
                   <button
                     onClick={() => onRemove(entry.id)}
                     style={{
-                      display: "flex", alignItems: "center", gap: 4,
-                      padding: "4px 10px", borderRadius: 5,
-                      border: "1px solid var(--border)", background: "transparent",
-                      color: "var(--text-muted)",
-                      cursor: "pointer", fontSize: 10, fontWeight: 600,
-                      fontFamily: "inherit", flexShrink: 0,
-                      transition: "color 0.12s, border-color 0.12s",
+                      display: "flex", padding: 4, border: "none", borderRadius: 4,
+                      background: "transparent", color: "var(--text-muted)", cursor: "pointer",
+                      transition: "color 0.08s",
                     }}
-                    onMouseEnter={e => { e.currentTarget.style.color = "var(--red)"; e.currentTarget.style.borderColor = "var(--red)"; }}
-                    onMouseLeave={e => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.borderColor = "var(--border)"; }}
-                  >
-                    <Trash2 size={10} /> Remove
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => handleAddClick(entry)}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 4,
-                      padding: "4px 10px", borderRadius: 5, border: "none",
-                      background: "var(--accent)", color: "#fff",
-                      cursor: "pointer", fontSize: 10, fontWeight: 600,
-                      fontFamily: "inherit", flexShrink: 0,
-                    }}
-                  >
-                    <Plus size={10} /> Add
-                  </button>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+                    onMouseEnter={e => { e.currentTarget.style.color = "var(--red)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.color = "var(--text-muted)"; }}
+                    title="Remove"
+                  ><Trash2 size={12} /></button>
+                </div>
+              );
+            })}
 
-      {filtered.length === 0 && (
-        <div style={{
-          textAlign: "center", padding: "20px 0",
-          color: "var(--text-muted)", fontSize: 12,
-        }}>
-          No servers match &ldquo;{search}&rdquo;.
-        </div>
-      )}
-
-      {/* ── Custom Servers (editable) ─────────────────────────── */}
-      {customServerNames.length > 0 && (
-        <div style={{ marginTop: 16, marginBottom: 10 }}>
-          <div style={{
-            fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
-            textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8,
-          }}>
-            Custom Servers
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {/* Custom servers — collapsible */}
             {customServerNames.map(name => {
               const srv = mcpConfig.mcpServers[name];
               if (!srv) return null;
@@ -1207,28 +1349,29 @@ function MCPDirectoryPanel({ activeServerNames, mcpConfig, mcpStatus, onAdd, onR
               const isOpen = expanded[name] ?? false;
               return (
                 <div key={name} style={{
+                  borderRadius: 8, overflow: "hidden",
                   background: "var(--bg-card)", border: "1px solid var(--border)",
-                  borderRadius: 10, overflow: "hidden",
                 }}>
-                  {/* Header */}
                   <div
                     onClick={() => onToggleExpand(name)}
                     style={{
-                      display: "flex", alignItems: "center", gap: 10,
+                      display: "flex", alignItems: "center", gap: 12,
                       padding: "10px 14px", cursor: "pointer",
                       borderBottom: isOpen ? "1px solid var(--border)" : "none",
                     }}
                   >
-                    {isOpen ? <ChevronDown size={13} style={{ color: "var(--text-muted)" }} />
-                      : <ChevronRight size={13} style={{ color: "var(--text-muted)" }} />}
-                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", flex: 1 }}>
-                      {name}
-                    </span>
-                    <span style={{
-                      width: 7, height: 7, borderRadius: "50%",
+                    {isOpen ? <ChevronDown size={12} style={{ color: "var(--text-muted)" }} />
+                      : <ChevronRight size={12} style={{ color: "var(--text-muted)" }} />}
+                    <div style={{
+                      width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
                       background: live?.connected ? "var(--green)" : "var(--text-muted)",
-                      flexShrink: 0,
-                    }} title={live?.connected ? "Connected" : "Disconnected"} />
+                      opacity: live?.connected ? 1 : 0.35,
+                    }} />
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", flex: 1 }}>{name}</span>
+                    <span style={{
+                      fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4,
+                      background: "var(--bg-tertiary)", color: "var(--text-muted)",
+                    }}>CUSTOM</span>
                     {live?.connected && (
                       <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
                         {live.tools.length} tool{live.tools.length !== 1 ? "s" : ""}
@@ -1236,28 +1379,20 @@ function MCPDirectoryPanel({ activeServerNames, mcpConfig, mcpStatus, onAdd, onR
                     )}
                     <button
                       onClick={(e) => { e.stopPropagation(); onRemove(name); }}
-                      title="Remove server"
+                      title="Remove"
                       style={{
                         display: "flex", padding: 4, border: "none", borderRadius: 4,
                         background: "transparent", color: "var(--text-muted)", cursor: "pointer",
+                        transition: "color 0.08s",
                       }}
-                      onMouseEnter={e => { e.currentTarget.style.color = "var(--red)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
-                      onMouseLeave={e => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "transparent"; }}
-                    >
-                      <Trash2 size={13} />
-                    </button>
+                      onMouseEnter={e => { e.currentTarget.style.color = "var(--red)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.color = "var(--text-muted)"; }}
+                    ><Trash2 size={12} /></button>
                   </div>
-
-                  {/* Body (expandable editor) */}
                   {isOpen && (
                     <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
                       <Field label="Command" hint="e.g. npx, node, python">
-                        <input
-                          value={srv.command}
-                          onChange={e => onUpdateCustom(name, { command: e.target.value })}
-                          placeholder="npx"
-                          style={inputStyle}
-                        />
+                        <input value={srv.command} onChange={e => onUpdateCustom(name, { command: e.target.value })} placeholder="npx" style={inputStyle} />
                       </Field>
                       <Field label="Arguments" hint="One per line">
                         <textarea
@@ -1271,38 +1406,20 @@ function MCPDirectoryPanel({ activeServerNames, mcpConfig, mcpStatus, onAdd, onR
                       <div>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                           <label style={labelStyle}>Environment Variables</label>
-                          <button onClick={() => onAddCustomEnv(name)} style={btnSecondary}>
-                            <Plus size={12} /> Add
-                          </button>
+                          <button onClick={() => onAddCustomEnv(name)} style={btnSecondary}><Plus size={12} /> Add</button>
                         </div>
                         {Object.keys(srv.env ?? {}).length === 0 ? (
-                          <div style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>
-                            No environment variables
-                          </div>
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>No environment variables</div>
                         ) : (
                           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                             {Object.entries(srv.env ?? {}).map(([k, v]) => (
                               <div key={k} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                                <span style={{
-                                  fontSize: 12, fontFamily: "monospace", color: "var(--text-secondary)",
-                                  minWidth: 100, flexShrink: 0,
-                                }}>{k}</span>
-                                <input
-                                  value={v}
-                                  onChange={e => onUpdateCustom(name, { env: { ...srv.env, [k]: e.target.value } })}
-                                  placeholder="value"
-                                  style={{ ...inputStyle, flex: 1 }}
-                                />
-                                <button
-                                  onClick={() => onRemoveCustomEnv(name, k)}
-                                  style={{
-                                    display: "flex", padding: 4, border: "none",
-                                    background: "transparent", color: "var(--text-muted)",
-                                    cursor: "pointer", borderRadius: 4,
-                                  }}
-                                  onMouseEnter={e => { e.currentTarget.style.color = "var(--red)"; }}
-                                  onMouseLeave={e => { e.currentTarget.style.color = "var(--text-muted)"; }}
-                                >
+                                <span style={{ fontSize: 12, fontFamily: "monospace", color: "var(--text-secondary)", minWidth: 100, flexShrink: 0 }}>{k}</span>
+                                <input value={v} onChange={e => onUpdateCustom(name, { env: { ...srv.env, [k]: e.target.value } })} placeholder="value" style={{ ...inputStyle, flex: 1 }} />
+                                <button onClick={() => onRemoveCustomEnv(name, k)} style={{
+                                  display: "flex", padding: 4, border: "none", background: "transparent", color: "var(--text-muted)", cursor: "pointer", borderRadius: 4,
+                                  transition: "color 0.08s",
+                                }} onMouseEnter={e => { e.currentTarget.style.color = "var(--red)"; }} onMouseLeave={e => { e.currentTarget.style.color = "var(--text-muted)"; }}>
                                   <Trash2 size={13} />
                                 </button>
                               </div>
@@ -1333,67 +1450,230 @@ function MCPDirectoryPanel({ activeServerNames, mcpConfig, mcpStatus, onAdd, onR
         </div>
       )}
 
-      {/* ── Add Custom MCP Server ─────────────────────────────── */}
+      {/* ── Browse Directory (collapsible) ── */}
+      <div>
+        <button
+          onClick={() => setShowDirectory(d => !d)}
+          style={{
+            display: "flex", alignItems: "center", gap: 8, width: "100%",
+            padding: "10px 14px", borderRadius: 8,
+            border: "1px solid var(--border)",
+            background: showDirectory ? "var(--bg-card)" : "transparent",
+            color: "var(--text-primary)", cursor: "pointer",
+            fontSize: 13, fontWeight: 500, fontFamily: "inherit",
+            transition: "background 0.1s, border-color 0.1s",
+          }}
+        >
+          {showDirectory ? <ChevronDown size={14} style={{ color: "var(--text-muted)" }} /> : <ChevronRight size={14} style={{ color: "var(--text-muted)" }} />}
+          <Package size={14} style={{ color: "var(--green)" }} />
+          <span style={{ flex: 1, textAlign: "left" }}>Browse Server Directory</span>
+          <span style={{
+            fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 4,
+            background: "var(--bg-tertiary)", color: "var(--text-muted)",
+            fontVariantNumeric: "tabular-nums",
+          }}>{MCP_DIRECTORY.length} available</span>
+        </button>
+
+        {showDirectory && (
+          <div style={{ marginTop: 10, animation: "fade-in 0.12s ease-out" }}>
+            {/* Search + Category — single compact row */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
+              <div style={{ position: "relative", flex: 1, minWidth: 160 }}>
+                <Search size={13} style={{
+                  position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)",
+                  color: "var(--text-muted)", pointerEvents: "none",
+                }} />
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Search servers..."
+                  style={{ ...inputStyle, paddingLeft: 30 }}
+                />
+              </div>
+              <div style={{ width: 160, flexShrink: 0 }}>
+                <Dropdown
+                  value={catFilter}
+                  onChange={v => setCatFilter(v as MCPCategory | "all")}
+                  options={categoryOptions}
+                  placeholder="Category"
+                  alignRight
+                />
+              </div>
+            </div>
+
+            {/* Setup panel (env var input for a server being added) */}
+            {setupEntry && (
+              <div style={{
+                background: "var(--bg-card)", border: "1px solid var(--accent)",
+                borderRadius: 8, padding: 14, marginBottom: 12,
+                animation: "fade-in 0.12s ease-out",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <Package size={14} style={{ color: "var(--accent)" }} />
+                  <div style={{ flex: 1 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
+                      {setupEntry.name}
+                    </span>
+                    <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 8 }}>
+                      Set environment variables
+                    </span>
+                  </div>
+                  <button onClick={() => { setSetupEntry(null); setEnvInputs({}); }} style={{
+                    display: "flex", padding: 4, border: "none", borderRadius: 4,
+                    background: "transparent", color: "var(--text-muted)", cursor: "pointer",
+                  }}>
+                    <X size={14} />
+                  </button>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {Object.entries(setupEntry.envVars).map(([varName, hint]) => (
+                    <div key={varName} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <span style={{
+                        fontSize: 11, fontFamily: "monospace", color: "var(--text-secondary)",
+                        minWidth: 130, flexShrink: 0,
+                      }}>{varName}</span>
+                      <input
+                        value={envInputs[varName] ?? ""}
+                        onChange={e => setEnvInputs(p => ({ ...p, [varName]: e.target.value }))}
+                        placeholder={hint}
+                        type="password"
+                        style={{ ...inputStyle, flex: 1, fontFamily: "monospace", fontSize: 12 }}
+                        onKeyDown={e => e.key === "Enter" && confirmSetup()}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
+                  <button onClick={() => { setSetupEntry(null); setEnvInputs({}); }} style={btnSecondary}>Cancel</button>
+                  <button onClick={confirmSetup} style={{
+                    display: "flex", alignItems: "center", gap: 5,
+                    padding: "6px 14px", borderRadius: 7, border: "none",
+                    background: "var(--accent)", color: "#fff",
+                    cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit",
+                  }}>
+                    <Plus size={12} /> Add
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Directory grid */}
+            <div style={{
+              display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+              gap: 8,
+            }}>
+              {filtered.map(entry => {
+                const catMeta = CATEGORY_META[entry.category];
+                return (
+                  <div key={entry.id} style={{
+                    display: "flex", flexDirection: "column", gap: 6,
+                    padding: "12px 14px", borderRadius: 8,
+                    background: "var(--bg-card)", border: "1px solid var(--border)",
+                    transition: "border-color 0.12s",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {entry.name}
+                      </span>
+                      <span style={{
+                        fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4,
+                        background: `color-mix(in srgb, ${catMeta.color} 10%, transparent)`,
+                        color: catMeta.color, flexShrink: 0,
+                      }}>{catMeta.label}</span>
+                    </div>
+
+                    <div style={{
+                      fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4,
+                      display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                      overflow: "hidden",
+                    }}>{entry.description}</div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: "auto" }}>
+                      <span style={{
+                        fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace",
+                        flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>{entry.tools.slice(0, 3).join(", ")}{entry.tools.length > 3 ? ` +${entry.tools.length - 3}` : ""}</span>
+                      {Object.keys(entry.envVars).length > 0 && (
+                        <span style={{
+                          fontSize: 9, padding: "2px 5px", borderRadius: 3,
+                          background: "var(--yellow-bg)", color: "var(--yellow)", flexShrink: 0,
+                        }}>KEY</span>
+                      )}
+                      {entry.docsUrl && (
+                        <a href={entry.docsUrl} target="_blank" rel="noopener noreferrer"
+                          style={{ display: "flex", padding: 3, borderRadius: 4, color: "var(--text-muted)", flexShrink: 0 }}
+                          title="Docs"
+                        ><ExternalLink size={11} /></a>
+                      )}
+                      <button
+                        onClick={() => handleAddClick(entry)}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 4,
+                          padding: "4px 10px", borderRadius: 5, border: "none",
+                          background: "var(--accent)", color: "#fff",
+                          cursor: "pointer", fontSize: 10, fontWeight: 600,
+                          fontFamily: "inherit", flexShrink: 0,
+                        }}
+                      ><Plus size={10} /> Add</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {filtered.length === 0 && (
+              <div style={{ textAlign: "center", padding: "20px 0", color: "var(--text-muted)", fontSize: 12 }}>
+                No servers match your search.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Add Custom Server ── */}
       {!showCustom ? (
         <button
           onClick={() => setShowCustom(true)}
           style={{
             display: "flex", alignItems: "center", gap: 6, width: "100%",
-            padding: "12px 16px", borderRadius: 10, marginTop: 8,
+            padding: "10px 14px", borderRadius: 8,
             border: "1px dashed var(--border)", background: "transparent",
-            color: "var(--text-muted)", cursor: "pointer",
-            fontSize: 12, fontFamily: "inherit",
-            transition: "border-color 0.15s, color 0.15s",
+            color: "var(--text-muted)", cursor: "pointer", fontSize: 12, fontFamily: "inherit",
+            transition: "border-color 0.12s, color 0.12s",
           }}
           onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.color = "var(--text-primary)"; }}
           onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.color = "var(--text-muted)"; }}
-        >
-          <Plus size={14} /> Add Custom MCP Server
-        </button>
+        ><Plus size={14} /> Add Custom Server</button>
       ) : (
         <div style={{
           background: "var(--bg-card)", border: "1px solid var(--accent)",
-          borderRadius: 10, padding: 16, marginTop: 8,
+          borderRadius: 8, padding: 14,
           animation: "fade-in 0.12s ease-out",
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-            <Server size={15} style={{ color: "var(--accent)" }} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", flex: 1 }}>
-              Add Custom MCP Server
-            </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <Server size={14} style={{ color: "var(--accent)" }} />
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", flex: 1 }}>Custom Server</span>
             <button onClick={() => setShowCustom(false)} style={{
               display: "flex", padding: 4, border: "none", borderRadius: 4,
               background: "transparent", color: "var(--text-muted)", cursor: "pointer",
-            }}>
-              <X size={14} />
-            </button>
+            }}><X size={14} /></button>
           </div>
-
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <Field label="Server Name" hint="e.g. my-server">
-              <input
-                value={customName}
-                onChange={e => setCustomName(e.target.value)}
-                placeholder="my-custom-server"
-                style={inputStyle}
-              />
-            </Field>
-            <Field label="Command" hint="e.g. npx, node, python, docker">
-              <input
-                value={customCmd}
-                onChange={e => setCustomCmd(e.target.value)}
-                placeholder="npx"
-                style={inputStyle}
-              />
-            </Field>
+            <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <Field label="Name" hint="e.g. my-server">
+                  <input value={customName} onChange={e => setCustomName(e.target.value)} placeholder="my-custom-server" style={inputStyle} />
+                </Field>
+              </div>
+              <div style={{ flex: 1 }}>
+                <Field label="Command" hint="e.g. npx, node">
+                  <input value={customCmd} onChange={e => setCustomCmd(e.target.value)} placeholder="npx" style={inputStyle} />
+                </Field>
+              </div>
+            </div>
             <Field label="Arguments" hint="One per line">
-              <textarea
-                value={customArgs}
-                onChange={e => setCustomArgs(e.target.value)}
-                placeholder={"-y\n@your/mcp-package\n--flag"}
-                rows={3}
-                style={{ ...inputStyle, resize: "vertical", fontFamily: "monospace", fontSize: 12, lineHeight: 1.6 }}
-              />
+              <textarea value={customArgs} onChange={e => setCustomArgs(e.target.value)} placeholder={"-y\n@your/mcp-package"}
+                rows={2} style={{ ...inputStyle, resize: "vertical", fontFamily: "monospace", fontSize: 12, lineHeight: 1.6 }} />
             </Field>
             <div>
               <label style={labelStyle}>Environment Variables</label>
@@ -1401,101 +1681,38 @@ function MCPDirectoryPanel({ activeServerNames, mcpConfig, mcpStatus, onAdd, onR
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
                   {Object.entries(customEnv).map(([k, v]) => (
                     <div key={k} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <span style={{
-                        fontSize: 12, fontFamily: "monospace", color: "var(--text-secondary)",
-                        minWidth: 100, flexShrink: 0,
-                      }}>{k}</span>
-                      <input
-                        value={v}
-                        onChange={e => setCustomEnv(p => ({ ...p, [k]: e.target.value }))}
-                        placeholder="value"
-                        style={{ ...inputStyle, flex: 1 }}
-                      />
-                      <button
-                        onClick={() => setCustomEnv(p => { const n = { ...p }; delete n[k]; return n; })}
-                        style={{
-                          display: "flex", padding: 4, border: "none",
-                          background: "transparent", color: "var(--text-muted)",
-                          cursor: "pointer", borderRadius: 4,
-                        }}
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                      <span style={{ fontSize: 11, fontFamily: "monospace", color: "var(--text-secondary)", minWidth: 100, flexShrink: 0 }}>{k}</span>
+                      <input value={v} onChange={e => setCustomEnv(p => ({ ...p, [k]: e.target.value }))} placeholder="value" style={{ ...inputStyle, flex: 1 }} />
+                      <button onClick={() => setCustomEnv(p => { const n = { ...p }; delete n[k]; return n; })}
+                        style={{ display: "flex", padding: 4, border: "none", background: "transparent", color: "var(--text-muted)", cursor: "pointer", borderRadius: 4 }}
+                      ><Trash2 size={12} /></button>
                     </div>
                   ))}
                 </div>
               )}
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <input
-                  value={customEnvKey}
-                  onChange={e => setCustomEnvKey(e.target.value)}
-                  placeholder="VAR_NAME"
-                  style={{ ...inputStyle, flex: 1, fontFamily: "monospace", fontSize: 12 }}
-                />
-                <input
-                  value={customEnvVal}
-                  onChange={e => setCustomEnvVal(e.target.value)}
-                  placeholder="value"
-                  style={{ ...inputStyle, flex: 1, fontSize: 12 }}
-                />
-                <button
-                  onClick={() => {
-                    if (customEnvKey.trim()) {
-                      setCustomEnv(p => ({ ...p, [customEnvKey.trim()]: customEnvVal }));
-                      setCustomEnvKey("");
-                      setCustomEnvVal("");
-                    }
-                  }}
-                  style={btnSecondary}
-                >
-                  <Plus size={12} />
-                </button>
+                <input value={customEnvKey} onChange={e => setCustomEnvKey(e.target.value)} placeholder="VAR_NAME" style={{ ...inputStyle, flex: 1, fontFamily: "monospace", fontSize: 12 }} />
+                <input value={customEnvVal} onChange={e => setCustomEnvVal(e.target.value)} placeholder="value" style={{ ...inputStyle, flex: 1, fontSize: 12 }} />
+                <button onClick={() => {
+                  if (customEnvKey.trim()) { setCustomEnv(p => ({ ...p, [customEnvKey.trim()]: customEnvVal })); setCustomEnvKey(""); setCustomEnvVal(""); }
+                }} style={btnSecondary}><Plus size={12} /></button>
               </div>
             </div>
           </div>
-
-          <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
-            <button onClick={() => setShowCustom(false)} style={btnSecondary}>
-              Cancel
-            </button>
-            <button
-              onClick={handleAddCustom}
-              disabled={!customName.trim() || !customCmd.trim()}
-              style={{
-                display: "flex", alignItems: "center", gap: 5,
-                padding: "6px 14px", borderRadius: 6, border: "none",
-                background: customName.trim() && customCmd.trim() ? "var(--accent)" : "var(--bg-tertiary)",
-                color: customName.trim() && customCmd.trim() ? "#fff" : "var(--text-muted)",
-                cursor: customName.trim() && customCmd.trim() ? "pointer" : "default",
-                fontSize: 11, fontWeight: 600, fontFamily: "inherit",
-              }}
-            >
-              <Plus size={12} /> Add Server
-            </button>
+          <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "flex-end" }}>
+            <button onClick={() => setShowCustom(false)} style={btnSecondary}>Cancel</button>
+            <button onClick={handleAddCustom} disabled={!customName.trim() || !customCmd.trim()} style={{
+              display: "flex", alignItems: "center", gap: 5,
+              padding: "6px 14px", borderRadius: 7, border: "none",
+              background: customName.trim() && customCmd.trim() ? "var(--accent)" : "var(--bg-tertiary)",
+              color: customName.trim() && customCmd.trim() ? "#fff" : "var(--text-muted)",
+              cursor: customName.trim() && customCmd.trim() ? "pointer" : "default",
+              fontSize: 11, fontWeight: 600, fontFamily: "inherit",
+            }}><Plus size={12} /> Add Server</button>
           </div>
         </div>
       )}
     </div>
-  );
-}
-
-function FilterChip({ label, active, onClick, color }: {
-  label: string; active: boolean; onClick: () => void; color: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: "3px 9px", borderRadius: 5, border: "none",
-        background: active ? `color-mix(in srgb, ${color} 15%, transparent)` : "var(--bg-tertiary)",
-        color: active ? color : "var(--text-muted)",
-        fontSize: 10, fontWeight: active ? 600 : 500,
-        cursor: "pointer", fontFamily: "inherit",
-        transition: "background 0.1s, color 0.1s",
-      }}
-    >
-      {label}
-    </button>
   );
 }
 
@@ -1526,6 +1743,7 @@ const btnSecondary: React.CSSProperties = {
   padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)",
   background: "var(--bg-tertiary)", color: "var(--text-secondary)",
   cursor: "pointer", fontSize: 11, fontFamily: "inherit",
+  transition: "background 0.08s, color 0.08s",
 };
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
