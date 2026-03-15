@@ -7,6 +7,7 @@
 
 import readline from "readline";
 import fs from "fs";
+import { join } from "path";
 
 import { config, USER_DATA_DIR, sharedWorkspace, agentWorkspace, getWorkspaceDirs } from "./config.js";
 import { initUserDataDir } from "./init.js";
@@ -273,18 +274,63 @@ function startLiveMonitor(): { toggle: () => boolean; interval: NodeJS.Timeout }
   };
 }
 
-// ── CLI mode flag ─────────────────────────────────────────────────────────
-const CLI_MODE = process.argv.slice(2).some((a) => a === "--cli" || a === "-c");
+// ── Commander.js CLI ──────────────────────────────────────────────────────
+import { Command } from "commander";
 
-// ── Main ───────────────────────────────────────────────────────────────────
+const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
 
-async function main(): Promise<void> {
-  // 0. Handle --migrate flag before anything else
-  if (process.argv.slice(2).some((a) => a === "--migrate" || a === "migrate")) {
+const program = new Command();
+program
+  .name("octo-vec")
+  .description("OCTO VEC — AI Agent Orchestration Platform")
+  .version(pkg.version, "-v, --version");
+
+// ── octo-vec start (default) ─────────────────────────────────────────────
+let CLI_MODE = false;
+
+program
+  .command("start", { isDefault: true })
+  .description("Start OCTO VEC (daemon mode by default)")
+  .option("-c, --cli", "Enable full interactive CLI mode with readline")
+  .option("--reset", "Wipe all tasks, memories, and queues on startup")
+  .action(async (opts: { cli?: boolean; reset?: boolean }) => {
+    CLI_MODE = !!opts.cli;
+    await startServer(!!opts.reset).catch((err) => {
+      console.error("[Fatal startup error]", err);
+      process.exit(1);
+    });
+  });
+
+// ── octo-vec dashboard ───────────────────────────────────────────────────
+program
+  .command("dashboard")
+  .description("Open the dashboard in your browser")
+  .action(() => {
+    const urlFile = join(USER_DATA_DIR, ".dashboard-url");
+    if (fs.existsSync(urlFile)) {
+      const url = fs.readFileSync(urlFile, "utf-8").trim();
+      console.log(`  Opening: ${url}`);
+      openInBrowser(url);
+    } else {
+      console.log("  Dashboard URL not found. Start OCTO VEC first: octo-vec start");
+    }
+    process.exit(0);
+  });
+
+// ── octo-vec migrate ─────────────────────────────────────────────────────
+program
+  .command("migrate")
+  .description("Migrate data from old ./data/ directory to ~/.octo-vec/")
+  .action(async () => {
     await runMigration();
     process.exit(0);
-  }
+  });
 
+program.parse();
+
+// ── Server startup ───────────────────────────────────────────────────────
+
+async function startServer(doStartupReset: boolean): Promise<void> {
   // 0b. First-run onboarding — only in --cli mode (dashboard handles it otherwise)
   if (CLI_MODE) {
     await runOnboardingIfNeeded();
@@ -298,10 +344,6 @@ async function main(): Promise<void> {
 
   // 1. Ensure all data/memory/workspace directories exist
   ensureDirs();
-
-  // 1b. Startup reset flag — triggered by: npm run dev /reset  OR  npm run dev -- --reset
-  //     Wipes tasks, queues, histories, memories before any agents are created.
-  const doStartupReset = process.argv.slice(2).some((a) => a === "--reset" || a === "/reset");
   if (doStartupReset) {
     if (CLI_MODE) console.log("\n  [STARTUP RESET] Wiping all tasks, memories, and queues...");
     ATPDatabase.clearAllTasks();
@@ -807,8 +849,3 @@ async function main(): Promise<void> {
 
   askLine();
 }
-
-main().catch((err) => {
-  console.error("[Fatal startup error]", err);
-  process.exit(1);
-});

@@ -7,7 +7,7 @@
 **A virtual software company — 9 autonomous AI agents that collaborate like real employees.**
 You talk to the PM. They handle the rest. No meetings. Just tentacles.
 
-[![Open Source](https://img.shields.io/badge/status-open%20source-3fb950?style=for-the-badge)](https://github.com/akhil2129/vec-atp)
+[![Open Source](https://img.shields.io/badge/status-open%20source-3fb950?style=for-the-badge)](https://github.com/akhil2129/octo-vec)
 [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![SQLite](https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://www.sqlite.org/)
 [![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
@@ -124,21 +124,21 @@ Frontend Developer, Backend Developer, Mobile Developer, Data Engineer, DBA, ML 
 
 ## Why OCTO VEC?
 
-Most AI coding tools give you **one agent that writes code**. OCTO VEC gives you **a whole company**.
+Most AI coding tools give you a fast code generator. OCTO VEC gives you **a whole company** — named agents with distinct roles, persistent memory, and a real-time dashboard to watch them work.
 
-| Feature | Copilot / Cursor | Devin / OpenHands | MetaGPT / ChatDev | **OCTO VEC** |
-|---------|:-:|:-:|:-:|:-:|
-| Writes code | Yes | Yes | Yes | Yes |
-| Multi-agent collaboration | No | No | Yes | **Yes** |
-| Persistent memory (STM/LTM/SLTM) | No | No | No | **Yes** |
-| Real security scanning (SAST/SCA/Secrets) | No | No | No | **Yes** |
-| Daily lifecycle (Sunset/Sunrise) | No | No | No | **Yes** |
-| Auto-compaction for long tasks | No | No | No | **Yes** |
-| Self-hosted, vendor-agnostic | No | Partial | Yes | **Yes** |
-| Full team simulation (PM, BA, QA, Security...) | No | No | Partial | **Yes (9+ agents)** |
-| Multi-channel (CLI/Telegram/Slack/Discord) | No | No | No | **Yes** |
-| Real-time dashboard with 10 views | No | No | No | **Yes** |
-| Per-agent cost tracking | No | No | No | **Yes** |
+| Feature | Copilot | Cursor | Devin | OpenHands | MetaGPT | ChatDev | **OCTO VEC** |
+|---------|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| Multi-agent team | — | Yes | — | Yes | Yes | Yes | **Yes (9+ roles)** |
+| Named role simulation (PM, BA, QA, Security…) | — | — | — | — | Partial | Partial | **Yes** |
+| Three-tier memory (STM/LTM/SLTM) | — | — | — | — | — | — | **Yes** |
+| Daily lifecycle (Sunset/Sunrise) | — | — | — | — | — | — | **Yes** |
+| Built-in security scanning (SAST/SCA/Secrets) | Yes | — | — | — | — | — | **Yes** |
+| Auto-compaction | — | Yes | — | Partial | — | — | **Yes** |
+| Multi-channel (CLI + Telegram + Slack + Discord) | — | — | Slack | Slack | — | — | **Yes (4)** |
+| Real-time web dashboard | — | — | Yes | Yes | — | — | **Yes (10 views)** |
+| Self-hosted, vendor-agnostic | — | — | — | Yes | Yes | Yes | **Yes** |
+| MCP support | Yes | Yes | Yes | Yes | — | — | **Yes** |
+| Per-agent cost tracking | — | — | — | — | — | — | **Yes** |
 
 ---
 
@@ -183,43 +183,28 @@ Most AI coding tools give you **one agent that writes code**. OCTO VEC gives you
 - An LLM API key (Groq free tier works great to start)
 - Docker (optional — for security scanning)
 
-### Setup
+### Install from npm
 
 ```bash
-# Clone the repo
-git clone https://github.com/akhil2129/vec-atp.git
-cd vec-atp
+npm install -g octo-vec
+octo-vec start
+```
 
-# Install dependencies
+### Or run from source
+
+```bash
+git clone https://github.com/akhil2129/octo-vec.git
+cd octo-vec
 npm install
-
-# Configure environment
-cp .env.example .env
-# Edit .env and add your API keys
-
-# Build the dashboard
-npm run dashboard:build
-
-# Start the system
 npm start
 ```
 
-The terminal will display:
+On first run, OCTO VEC will:
+1. Create your data directory (`~/.octo-vec` on Mac/Linux, `%APPDATA%/octo-vec` on Windows)
+2. Open the dashboard in your browser
+3. Walk you through onboarding — set your name, configure an API key
 
-```
-+----------------------------------------------------+
-|       VEC -- Virtual Employed Company               |
-|       TOWER  |  Agent Task Portal                   |
-+----------------------------------------------------+
-  Model    : groq/moonshotai/kimi-k2-instruct-0905
-  Dashboard: http://localhost:3000?key=abc123...
-  Telegram : disabled
-  Slack    : disabled
-  Discord  : disabled
-  CLI      : ON
-```
-
-Open the dashboard URL in your browser. Type anything in the terminal — you're talking to **Arjun** (your PM).
+The dashboard opens automatically. Your PM (Arjun) is ready to take requests.
 
 ### First Message
 
@@ -466,7 +451,7 @@ Scans run via Docker containers. Reports saved to `workspace/shared/reports/` an
 
 OCTO VEC supports the [Model Context Protocol](https://modelcontextprotocol.io/) for extending agent capabilities.
 
-Configure MCP servers in **Dashboard > Settings > MCP**, or edit `data/mcp-servers.json`:
+Configure MCP servers in **Dashboard > Settings > MCP**, or edit `mcp-servers.json` in your data directory:
 
 ```json
 {
@@ -550,12 +535,15 @@ octo-vec/
     src/hooks/            -- useApi, useSSE, usePolling
     src/components/       -- Sidebar, Dropdown, ThemeSwitcher
 
-  data/                   -- Runtime data (gitignored)
-    roster.json           -- Agent definitions & role templates
-    atp.db                -- SQLite database
+  core/                   -- Read-only assets (ships with npm)
+    prompts/              -- Agent prompt templates
+    roster.json           -- Default agent roster seed
 
-  memory/                 -- Agent memory files (gitignored)
-  workspace/              -- Agent work output
+  ~/.octo-vec/            -- User data directory (runtime state)
+    roster.json           -- Active agent roster
+    atp.db                -- SQLite database
+    memory/               -- Agent memory files
+  workspace/              -- Agent work output (cwd/workspace)
     shared/               -- Cross-agent deliverables
     projects/             -- Standalone projects
     agents/               -- Per-agent workspaces
@@ -582,30 +570,24 @@ octo-vec/
 
 ---
 
-## Scripts
+## CLI Commands
 
 ```bash
-npm start                # Start TOWER (production)
-npm run dev              # Start with hot-reload (development)
-npm run dashboard:build  # Build the dashboard frontend
-npm run dashboard:dev    # Run dashboard in dev mode (HMR)
+octo-vec start              # Start in daemon mode (dashboard only, no terminal input)
+octo-vec start --cli        # Start with full interactive CLI mode
+octo-vec start --reset      # Full reset: clear all tasks, memories, queues, histories
+octo-vec dashboard          # Re-open the dashboard in your browser
+octo-vec migrate            # Migrate old data/ directory to ~/.octo-vec
 ```
 
-### Startup Flags
+### Development
 
 ```bash
-npm start -- --reset     # Full reset: clear all tasks, memories, queues, histories
+npm start                   # Start with tsx (dev mode, daemon)
+npm start -- --cli          # Start with tsx (dev mode, interactive CLI)
+npm run dev                 # Start with hot-reload
+npm run dashboard:dev       # Run dashboard frontend in dev mode (HMR)
 ```
-
-### Headless Mode
-
-Run without CLI terminal — for server deployments:
-
-```env
-VEC_CLI_ENABLED=0
-```
-
-Interact via Dashboard, Telegram, Slack, or Discord only.
 
 ---
 

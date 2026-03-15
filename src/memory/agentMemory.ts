@@ -1,5 +1,5 @@
 /**
- * OpenClaw-style memory loader for VEC agents.
+ * Persistent memory loader for VEC agents.
  *
  * Auto-loads an agent's persistent memory into prompt context:
  *   - SLTM (sltm.md)              → permanent identity/knowledge, always loaded

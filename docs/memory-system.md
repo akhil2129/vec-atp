@@ -300,7 +300,7 @@ memory/
 
 ## Design Philosophy
 
-The memory system follows an **"OpenClaw-style"** approach:
+The memory system follows a **file-based** approach:
 - All memory is **plain Markdown** — readable by humans without any tooling
 - Files are **grep-searchable** — agents can search their own memory
 - **No database** for memory — just files

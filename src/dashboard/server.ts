@@ -20,7 +20,7 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { config, PACKAGE_ROOT } from "../config.js";
+import { config, PACKAGE_ROOT, USER_DATA_DIR } from "../config.js";
 import { getMaskedIntegrationConfig, saveIntegrationConfig } from "../integrations/integrationConfig.js";
 
 // React build output — relative to package root (works both in dev and npm global install)
@@ -3197,6 +3197,8 @@ export function startDashboardServer(runtime: AgentRuntime, port = config.dashbo
     const apiKey = getDashboardApiKey();
     const url = `http://${host}:${port}?key=${apiKey}`;
     console.log(`  Dashboard: ${url}`);
+    // Persist URL so `octo-vec dashboard` can reopen it
+    try { writeFileSync(join(USER_DATA_DIR, ".dashboard-url"), url, "utf-8"); } catch { /* non-fatal */ }
     if (onReady) onReady(url);
   });
 
